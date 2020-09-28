@@ -1,0 +1,6 @@
+bin
+obj
+src/INSIGHT/obj
+grab_insight.sh
+.vscode
+.DS_Store
