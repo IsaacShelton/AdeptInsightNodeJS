@@ -8,15 +8,15 @@ EXPORTED_FUNCTIONS=['_server_main', '_malloc', '_free']
 INSIGHT=obj/insight.a
 
 develop: insight out-directories
-	emcc $(SOURCES) -DADEPT_INSIGHT_BUILD -I"$(INCLUDE)" -I"$(INSIGHT_INCLUDE)" -s "EXPORTED_FUNCTIONS=$(EXPORTED_FUNCTIONS)" -s --pre-js js/pre.js --post-js js/post.js -lnodefs.js $(INSIGHT) -o bin/main.js
+	emcc $(SOURCES) -DADEPT_INSIGHT_BUILD -I"$(INCLUDE)" -I"$(INSIGHT_INCLUDE)" -s FORCE_FILESYSTEM=1 -s "EXPORTED_FUNCTIONS=$(EXPORTED_FUNCTIONS)" -s --pre-js js/pre.js --post-js js/post.js $(INSIGHT) -lnodefs.js -o bin/main.js
 
-release:
-	emcc $(SOURCES) -DADEPT_INSIGHT_BUILD -I"$(INCLUDE)" -I"$(INSIGHT_INCLUDE)" -s "EXPORTED_FUNCTIONS=$(EXPORTED_FUNCTIONS)" -s --pre-js js/pre.js -lnodefs.js $(INSIGHT) -o bin/AdeptInsightServer.js
+release: insight  out-directories
+	emcc $(SOURCES) -DADEPT_INSIGHT_BUILD -I"$(INCLUDE)" -I"$(INSIGHT_INCLUDE)" -s FORCE_FILESYSTEM=1 -s "EXPORTED_FUNCTIONS=$(EXPORTED_FUNCTIONS)" -s --pre-js js/pre.js $(INSIGHT) -lnodefs.js -o bin/insight_server.js
 
 only-run:
 	node bin/main.js
 
-run: release only-run
+run: develop only-run
 
 insight:
 	$(MAKE) -C src/INSIGHT/emscripten

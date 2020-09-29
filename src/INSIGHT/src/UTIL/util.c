@@ -115,20 +115,20 @@ char *mallocandsprintf(const char *format, ...){
     return destination;
 }
 
-strong_cstr_t string_to_escaped_string(char *array, length_t length){
+strong_cstr_t string_to_escaped_string(char *array, length_t length, char escaped_quote){
     length_t put_index = 1;
     length_t special_characters = 0;
 
     // Count number of special characters (\n, \t, \b, etc.)
     for(length_t i = 0; i != length; i++){
-        if(array[i] <= 0x1F || array[i] == '\\') special_characters++;
+        if(array[i] <= 0x1F || array[i] == '\\' || array[i] == escaped_quote) special_characters++;
     }
 
     strong_cstr_t string = malloc(length + special_characters + 3);
-    string[0] = '\"';
+    string[0] = escaped_quote;
     
     for(length_t i = 0; i != length; i++){
-        if(array[i] <= 0x1F || array[i] == '\\'){
+        if(array[i] <= 0x1F || array[i] == '\\' || array[i] == escaped_quote){
             // Escape special character
             string[put_index++] = '\\';
         } else {
@@ -136,6 +136,7 @@ strong_cstr_t string_to_escaped_string(char *array, length_t length){
             string[put_index++] = array[i];
             continue;
         }
+
         switch(array[i]){
         case '\0': string[put_index++] =  '0'; break;
         case '\t': string[put_index++] =  't'; break;
@@ -144,14 +145,18 @@ strong_cstr_t string_to_escaped_string(char *array, length_t length){
         case '\b': string[put_index++] =  'b'; break;
         case '\e': string[put_index++] =  'e'; break;
         case '\\': string[put_index++] = '\\'; break;
-        case '"':  string[put_index++] =  '"'; break;
         default:
+            if(array[i] == escaped_quote){
+                string[put_index++] = escaped_quote;
+                break;
+            }
+
             // Unrecognized special character, don't escape
             string[put_index - 1] = array[i];
         }
     }
 
-    string[put_index++] = '"';
+    string[put_index++] = escaped_quote;
     string[put_index++] = '\0';
     return string;
 }

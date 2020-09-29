@@ -25,6 +25,13 @@ function invokeInsight(query_json_string){
 }
 
 setTimeout(() => {
-    var query = '{"intent": "parse", "file", "/Users/isaac/main.adept"}';
+    var query = JSON.stringify(
+        {
+            "query": "validate",
+            "infrastructure": "/Users/isaac/Projects/Adept/bin/",
+            "filename": "/Users/isaac/vsl.txt"
+            //"filename": "/Users/isaac/main.adept"
+        }
+    );
     console.log(invokeInsight(query));
 }, 100);
