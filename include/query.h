@@ -19,6 +19,7 @@ typedef struct {
     query_kind_t kind;
     maybe_null_strong_cstr_t infrastructure;
     maybe_null_strong_cstr_t filename;
+    maybe_null_strong_cstr_t code;
 } query_t;
 
 // ---------------- query_t ----------------
@@ -38,5 +39,9 @@ successful_t query_parse(weak_cstr_t json, query_t *out_query, strong_cstr_t *ou
 // ---------------- query_set_kind_by_name ----------------
 // Sets query kind by name
 successful_t query_set_kind_by_name(query_t *out_query, weak_cstr_t kind_name);
+
+// ---------------- unescape_code_string ----------------
+// Unescapes the code string given for 'code' parameter
+strong_cstr_t unescape_code_string(weak_cstr_t escaped);
 
 #endif // _ISAAC_QUERY_H

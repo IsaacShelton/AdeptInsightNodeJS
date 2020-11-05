@@ -51,7 +51,7 @@ errorcode_t parse_tokens(parse_ctx_t *ctx){
         switch(tokens[i].id){
         case TOKEN_NEWLINE:
             break;
-        case TOKEN_FUNC: case TOKEN_STDCALL: case TOKEN_VERBATIM:
+        case TOKEN_FUNC: case TOKEN_STDCALL: case TOKEN_VERBATIM: case TOKEN_IMPLICIT:
             if(parse_func(ctx)) return FAILURE;
             break;
         case TOKEN_FOREIGN:
@@ -67,8 +67,8 @@ errorcode_t parse_tokens(parse_ctx_t *ctx){
         case TOKEN_UNION:
             if(parse_struct(ctx, true)) return FAILURE;
             break;
-        case TOKEN_CONST:
-            if(parse_global_constant_declaration(ctx)) return FAILURE;
+        case TOKEN_DEFINE:
+            if(parse_global_constant_definition(ctx)) return FAILURE;
             break;
         case TOKEN_WORD:
             if(ctx->compiler->traits & COMPILER_COLON_COLON && tokens[i + 1].id == TOKEN_ASSOCIATE){
@@ -77,8 +77,14 @@ errorcode_t parse_tokens(parse_ctx_t *ctx){
                 break;
             }
             /* fallthrough */
-        case TOKEN_EXTERNAL:
-            if(parse_global(ctx)) return FAILURE;
+        case TOKEN_EXTERNAL: {
+                tokenid_t next = tokens[i + 1].id;
+                if(next == TOKEN_FUNC || next == TOKEN_STDCALL || next == TOKEN_VERBATIM || next == TOKEN_IMPLICIT){
+                    if(parse_func(ctx)) return FAILURE;
+                } else {
+                    if(parse_global(ctx)) return FAILURE; 
+                }
+            }
             break;
         case TOKEN_ALIAS:
             if(parse_alias(ctx)) return FAILURE;

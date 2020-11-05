@@ -74,6 +74,11 @@ void handle_validation_query(query_t *query, json_builder_t *builder){
 		return;
 	}
 
+	if(query->code == NULL){
+		json_build_string(builder, "Validation query is missing field 'code'");
+		return;
+	}
+
 	compiler_t compiler;
 	compiler_init(&compiler);
 	object_t *object = compiler_new_object(&compiler);
@@ -87,15 +92,13 @@ void handle_validation_query(query_t *query, json_builder_t *builder){
 	// Set compiler root
 	compiler.root = strclone(query->infrastructure);
 
-	if(compiler_read_file(&compiler, object)){
-		char *s = mallocandsprintf("Failed to read file '%s'", object->full_filename);
-		json_build_string(builder, s);
-		free(s);
-		goto cleanup;
-	}
-
-	if(lex(&compiler, object))   goto store_and_cleanup;
-	if(parse(&compiler, object)) goto store_and_cleanup;
+	// NOTE: Passing ownership of 'code' to object instance!!!
+	object->buffer = query->code;
+	object->buffer_length = strlen(query->code);
+	query->code = NULL;
+	
+	if(lex_buffer(&compiler, object))   goto store_and_cleanup;
+	if(parse(&compiler, object))        goto store_and_cleanup;
 
 	length_t i;
 
@@ -135,10 +138,6 @@ store_and_cleanup:
 
 		json_build_object_end(builder);
 	}
-
-	// result_error = temporaryCompiler.error;
-	// result_warnings = temporaryCompiler.warnings;
-	// result_warnings_length = temporaryCompiler.warnings_length;
 
 	json_build_array_end(builder);
 

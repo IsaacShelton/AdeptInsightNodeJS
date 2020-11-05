@@ -31,6 +31,12 @@ ast_elem_t *ast_elem_clone(const ast_elem_t *element){
         ((ast_elem_fixed_array_t*) new_element)->source = element->source;
         ((ast_elem_fixed_array_t*) new_element)->length = ((ast_elem_fixed_array_t*) element)->length;
         break;
+    case AST_ELEM_POLYCOUNT:
+        new_element = malloc(sizeof(ast_elem_polycount_t));
+        ((ast_elem_polycount_t*) new_element)->id = AST_ELEM_POLYCOUNT;
+        ((ast_elem_polycount_t*) new_element)->source = element->source;
+        ((ast_elem_polycount_t*) new_element)->name = strclone(((ast_elem_polycount_t*) element)->name);
+        break;
     case AST_ELEM_GENERIC_INT:
         new_element = malloc(sizeof(ast_elem_t));
         new_element->id = AST_ELEM_GENERIC_INT;
@@ -90,7 +96,7 @@ ast_elem_t *ast_elem_clone(const ast_elem_t *element){
             break;
         }
     default:
-        redprintf("INTERNAL ERROR: Encountered unexpected type element id when cloning ast_elem_t, a crash will probably follow...\n");
+        internalerrorprintf("Encountered unexpected type element id when cloning ast_elem_t, a crash will probably follow...\n");
     }
 
     return new_element;
@@ -132,6 +138,10 @@ void ast_type_free(ast_type_t *type){
             }
             free(type->elements[i]);
             break;
+        case AST_ELEM_POLYCOUNT:
+            free(((ast_elem_polymorph_t*) type->elements[i])->name);
+            free(type->elements[i]);
+            break;
         case AST_ELEM_POLYMORPH:
             free(((ast_elem_polymorph_t*) type->elements[i])->name);
             free(type->elements[i]);
@@ -149,7 +159,7 @@ void ast_type_free(ast_type_t *type){
             }
             break;
         default:
-            redprintf("INTERNAL ERROR: Encountered unexpected type element id when freeing ast_type_t\n");
+            internalerrorprintf("Encountered unexpected type element id when freeing ast_type_t\n");
         }
     }
 
@@ -429,6 +439,18 @@ strong_cstr_t ast_type_str(const ast_type_t *type){
                 name_length += polyname_length + prereqname_length + 2;
             }
             break;
+        case AST_ELEM_POLYCOUNT: {
+                const char *polyname = ((ast_elem_polycount_t*) type->elements[i])->name;
+                length_t polyname_length = strlen(polyname);
+                EXTEND_NAME_MACRO(polyname_length + 3);
+                name[name_length++] = '$';
+                name[name_length++] = '#';
+
+                memcpy(&name[name_length], polyname, polyname_length + 1);
+                name_length += polyname_length;
+                name[name_length++] = ' ';
+            }
+            break;
         case AST_ELEM_GENERIC_BASE: {
                 ast_elem_generic_base_t *generic_base = (ast_elem_generic_base_t*) type->elements[i];
 
@@ -468,7 +490,7 @@ strong_cstr_t ast_type_str(const ast_type_t *type){
             }
             break;
         default:
-            printf("INTERNAL ERROR: Encountered unexpected element type 0x%08X when converting ast_type_t to a string\n", type->elements[i]->id);
+            internalerrorprintf("Encountered unexpected element type 0x%08X when converting ast_type_t to a string\n", type->elements[i]->id);
             return NULL;
         }
     }
@@ -531,7 +553,7 @@ bool ast_types_identical(const ast_type_t *a, const ast_type_t *b){
                 ast_elem_generic_base_t *generic_base_b = (ast_elem_generic_base_t*) b->elements[i];
 
                 if(generic_base_a->name_is_polymorphic || generic_base_b->name_is_polymorphic){
-                    redprintf("INTERNAL ERROR: polymorphic names for generic structs not implemented in ast_types_identical\n");
+                    internalerrorprintf("polymorphic names for generic structs not implemented in ast_types_identical\n");
                     return false;
                 }
 
@@ -550,6 +572,12 @@ bool ast_types_identical(const ast_type_t *a, const ast_type_t *b){
                 if(polymorph_a->allow_auto_conversion != polymorph_b->allow_auto_conversion) return false;
             }
             break;
+        case AST_ELEM_POLYCOUNT: {
+                ast_elem_polycount_t *polycount_a = (ast_elem_polycount_t*) a->elements[i];
+                ast_elem_polycount_t *polycount_b = (ast_elem_polycount_t*) b->elements[i];
+                if(strcmp(polycount_a->name, polycount_b->name) != 0) return false;
+            }
+            break;
         case AST_ELEM_POLYMORPH_PREREQ: {
                 ast_elem_polymorph_prereq_t *polymorph_a = (ast_elem_polymorph_prereq_t*) a->elements[i];
                 ast_elem_polymorph_prereq_t *polymorph_b = (ast_elem_polymorph_prereq_t*) b->elements[i];
@@ -559,7 +587,7 @@ bool ast_types_identical(const ast_type_t *a, const ast_type_t *b){
             }
             break;
         default:
-            redprintf("INTERNAL ERROR: ast_types_identical received unknown element id\n");
+            internalerrorprintf("ast_types_identical received unknown element id\n");
             return false;
         }
     }
@@ -700,6 +728,7 @@ bool ast_type_has_polymorph(const ast_type_t *type){
             break;
         case AST_ELEM_POLYMORPH:
         case AST_ELEM_POLYMORPH_PREREQ:
+        case AST_ELEM_POLYCOUNT:
             return true;
         case AST_ELEM_GENERIC_BASE: {
                 ast_elem_generic_base_t *generic_base = (ast_elem_generic_base_t*) type->elements[i];
@@ -711,7 +740,7 @@ bool ast_type_has_polymorph(const ast_type_t *type){
             }
             break;
         default:
-            redprintf("INTERNAL ERROR: ast_type_has_polymorph encountered unknown element id 0x%8X\n", type->elements[i]->id);
+            internalerrorprintf("ast_type_has_polymorph encountered unknown element id 0x%08X\n", type->elements[i]->id);
         }
     }
     return false;
@@ -719,7 +748,7 @@ bool ast_type_has_polymorph(const ast_type_t *type){
 
 void ast_type_dereference(ast_type_t *inout_type){
     if(inout_type->elements_length < 2 || inout_type->elements[0]->id != AST_ELEM_POINTER){
-        redprintf("INTERNAL ERROR: ast_type_dereference received non pointer type\n");
+        internalerrorprintf("ast_type_dereference received non pointer type\n");
         return;
     }
 
@@ -730,31 +759,65 @@ void ast_type_dereference(ast_type_t *inout_type){
     inout_type->elements_length--; // Reduce length accordingly
 }
 
-void ast_type_var_catalog_init(ast_type_var_catalog_t *catalog){
-    catalog->type_vars = NULL;
-    catalog->length = 0;
-    catalog->capacity = 0;
-}
-
-void ast_type_var_catalog_free(ast_type_var_catalog_t *catalog){
-    for(length_t i = 0; i != catalog->length; i++){
-        ast_type_free(&catalog->type_vars[i].binding);
+void ast_type_unwrap_fixed_array(ast_type_t *inout_type){
+    if(inout_type->elements_length < 2 || inout_type->elements[0]->id != AST_ELEM_FIXED_ARRAY){
+        internalerrorprintf("ast_type_unwrap_fixed_array received non fixed-array type\n");
+        return;
     }
-    free(catalog->type_vars);
+
+    // Modify ast_type_t to remove a fixed-array element from the front
+    // DANGEROUS: Manually deleting ast_elem_fixed_array_t
+    free(inout_type->elements[0]);
+    memmove(inout_type->elements, &inout_type->elements[1], sizeof(ast_elem_t*) * (inout_type->elements_length - 1));
+    inout_type->elements_length--; // Reduce length accordingly
 }
 
-void ast_type_var_catalog_add(ast_type_var_catalog_t *catalog, weak_cstr_t name, ast_type_t *binding){
-    expand((void**) &catalog->type_vars, sizeof(ast_type_var_t), catalog->length, &catalog->capacity, 1, 4);
-    ast_type_var_t *type_var = &catalog->type_vars[catalog->length++];
+void ast_poly_catalog_init(ast_poly_catalog_t *catalog){
+    catalog->types = NULL;
+    catalog->types_length = 0;
+    catalog->types_capacity = 0;
+    catalog->counts = NULL;
+    catalog->counts_length = 0;
+    catalog->counts_capacity = 0;
+}
+
+void ast_poly_catalog_free(ast_poly_catalog_t *catalog){
+    for(length_t i = 0; i != catalog->types_length; i++){
+        ast_type_free(&catalog->types[i].binding);
+    }
+    free(catalog->types);
+    free(catalog->counts);
+}
+
+void ast_poly_catalog_add_type(ast_poly_catalog_t *catalog, weak_cstr_t name, ast_type_t *binding){
+    expand((void**) &catalog->types, sizeof(ast_poly_catalog_type_t), catalog->types_length, &catalog->types_capacity, 1, 4);
+    ast_poly_catalog_type_t *type_var = &catalog->types[catalog->types_length++];
     type_var->name = name;
     type_var->binding = ast_type_clone(binding);
 }
 
-ast_type_var_t *ast_type_var_catalog_find(ast_type_var_catalog_t *catalog, weak_cstr_t name){
+void ast_poly_catalog_add_count(ast_poly_catalog_t *catalog, weak_cstr_t name, length_t binding){
+    expand((void**) &catalog->counts, sizeof(ast_poly_catalog_count_t), catalog->counts_length, &catalog->counts_capacity, 1, 4);
+    ast_poly_catalog_count_t *count_var = &catalog->counts[catalog->counts_length++];
+    count_var->name = name;
+    count_var->binding = binding;
+}
+
+ast_poly_catalog_type_t *ast_poly_catalog_find_type(ast_poly_catalog_t *catalog, weak_cstr_t name){
     // TODO: SPEED: Improve searching (maybe not worth it?)
 
-    for(length_t i = 0; i != catalog->length; i++){
-        if(strcmp(catalog->type_vars[i].name, name) == 0) return &catalog->type_vars[i];
+    for(length_t i = 0; i != catalog->types_length; i++){
+        if(strcmp(catalog->types[i].name, name) == 0) return &catalog->types[i];
+    }
+
+    return NULL;
+}
+
+ast_poly_catalog_count_t *ast_poly_catalog_find_count(ast_poly_catalog_t *catalog, weak_cstr_t name){
+    // TODO: SPEED: Improve searching (maybe not worth it?)
+
+    for(length_t i = 0; i != catalog->counts_length; i++){
+        if(strcmp(catalog->counts[i].name, name) == 0) return &catalog->counts[i];
     }
 
     return NULL;
@@ -803,6 +866,12 @@ hash_t ast_elem_hash(ast_elem_t *element){
             element_hash = hash_combine(element_hash, hash_data(polymorph->name, strlen(polymorph->name)));
         }
         break;
+    case AST_ELEM_POLYCOUNT: {
+            ast_elem_polycount_t *polycount = (ast_elem_polycount_t*) element;
+            element_hash = hash_combine(element_hash, hash_data("#", 1));
+            element_hash = hash_combine(element_hash, hash_data(polycount->name, strlen(polycount->name)));
+        }
+        break;
     case AST_ELEM_POLYMORPH_PREREQ: {
             ast_elem_polymorph_prereq_t *polymorph_prereq = (ast_elem_polymorph_prereq_t*) element;
             element_hash = hash_combine(element_hash, hash_data(polymorph_prereq->name, strlen(polymorph_prereq->name)));
@@ -821,7 +890,7 @@ hash_t ast_elem_hash(ast_elem_t *element){
         }
         break;
     default:
-        redprintf("INTERNAL ERROR: Encountered unexpected type element id when cloning ast_elem_t, a crash will probably follow...\n");
+        internalerrorprintf("Encountered unexpected type element id when cloning ast_elem_t, a crash will probably follow...\n");
     }
 
     return element_hash;

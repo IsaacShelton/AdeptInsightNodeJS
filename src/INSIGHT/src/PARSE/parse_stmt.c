@@ -119,8 +119,8 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                 stmt_list->statements[stmt_list->length++] = expression;
             }
             break;
-        case TOKEN_CONST:
-            if(parse_local_constant_declaration(ctx, stmt_list, source)) return FAILURE;
+        case TOKEN_DEFINE:
+            if(parse_local_constant_declaration(ctx, stmt_list, sources[*i])) return FAILURE;
             break;
         case TOKEN_WORD: {
                 source = sources[(*i)++]; // Read ahead to see what type of statement this is
@@ -143,6 +143,7 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                 case TOKEN_GENERIC_INT: /*fixed array*/ case TOKEN_MULTIPLY: /*pointer*/
                 case TOKEN_LESSTHAN: case TOKEN_BIT_LSHIFT: case TOKEN_BIT_LGC_LSHIFT: /*generics*/
                 case TOKEN_POLYMORPH: /*polymorphic type*/ case TOKEN_COLON: /*experimental : type syntax*/
+                case TOKEN_POLYCOUNT: /*polymorphic count*/
                     (*i)--; if(parse_stmt_declare(ctx, stmt_list)) return FAILURE;
                     break;
                 default:
@@ -153,114 +154,16 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                 }
             }
             break;
+        case TOKEN_CONST: case TOKEN_STATIC:
+            if(parse_stmt_declare(ctx, stmt_list)) return FAILURE;
+            break;
         case TOKEN_MULTIPLY: case TOKEN_OPEN: case TOKEN_INCREMENT: case TOKEN_DECREMENT:
         case TOKEN_BIT_AND: case TOKEN_BIT_OR: case TOKEN_BIT_XOR: case TOKEN_BIT_LSHIFT: case TOKEN_BIT_RSHIFT:
         case TOKEN_BIT_LGC_LSHIFT: case TOKEN_BIT_LGC_RSHIFT: /* DUPLICATE: case TOKEN_ADDRESS: */
             if(parse_assign(ctx, stmt_list)) return FAILURE;
             break;
-        case TOKEN_IF: case TOKEN_UNLESS: {
-                unsigned int conditional_type = tokens[*i].id;
-                source = sources[(*i)++];
-                ast_expr_t *conditional;
-                trait_t stmts_mode;
-
-                if(parse_expr(ctx, &conditional)) return FAILURE;
-
-                if(parse_ignore_newlines(ctx, "Expected '{' or ',' after conditional expression")){
-                    ast_expr_free_fully(conditional);
-                    return FAILURE;
-                }
-
-                switch(tokens[(*i)++].id){
-                case TOKEN_BEGIN: stmts_mode = PARSE_STMTS_STANDARD; break;
-                case TOKEN_NEXT:  stmts_mode = PARSE_STMTS_SINGLE;   break;
-                default:
-                    compiler_panic(ctx->compiler, sources[*i - 1], "Expected '{' or ',' after conditional expression");
-                    ast_expr_free_fully(conditional);
-                    return FAILURE;
-                }
-
-                ast_expr_list_t if_stmt_list;
-                if_stmt_list.statements = malloc(sizeof(ast_expr_t*) * 4);
-                if_stmt_list.length = 0;
-                if_stmt_list.capacity = 4;
-
-                defer_scope_t if_defer_scope;
-                defer_scope_init(&if_defer_scope, defer_scope, NULL, TRAIT_NONE);
-
-                if(parse_stmts(ctx, &if_stmt_list, &if_defer_scope, stmts_mode)){
-                    ast_free_statements_fully(if_stmt_list.statements, if_stmt_list.length);
-                    ast_expr_free_fully(conditional);
-                    defer_scope_free(&if_defer_scope);
-                    return FAILURE;
-                }
-
-                defer_scope_free(&if_defer_scope);
-
-                if(!(stmts_mode & PARSE_STMTS_SINGLE)) (*i)++;
-
-                // Read ahead of newlines to check for 'else'
-                length_t i_readahead = *i;
-                while(tokens[i_readahead].id == TOKEN_NEWLINE && i_readahead != ctx->tokenlist->length) i_readahead++;
-
-                if(tokens[i_readahead].id == TOKEN_ELSE){
-                    *i = i_readahead;
-
-                    switch(tokens[++(*i)].id){
-                    case TOKEN_NEXT:
-                        stmts_mode = PARSE_STMTS_SINGLE;
-                        (*i)++; break;
-                    case TOKEN_BEGIN:
-                        stmts_mode = PARSE_STMTS_STANDARD;
-                        (*i)++; break;
-                    default:
-                        stmts_mode = PARSE_STMTS_SINGLE;
-                    }
-
-                    ast_expr_list_t else_stmt_list;
-                    else_stmt_list.statements = malloc(sizeof(ast_expr_t*) * 4);
-                    else_stmt_list.length = 0;
-                    else_stmt_list.capacity = 4;
-
-                    // Reuse 'if_defer_scope' for else defer scope
-                    defer_scope_init(&if_defer_scope, defer_scope, NULL, TRAIT_NONE);
-
-                    if(parse_stmts(ctx, &else_stmt_list, &if_defer_scope, stmts_mode)){
-                        ast_free_statements_fully(else_stmt_list.statements, else_stmt_list.length);
-                        ast_expr_free_fully(conditional);
-                        defer_scope_free(&if_defer_scope);
-                        return FAILURE;
-                    }
-
-                    defer_scope_free(&if_defer_scope);
-
-                    if(stmts_mode & PARSE_STMTS_SINGLE) (*i)--; else (*i)++;
-
-                    ast_expr_ifelse_t *stmt = malloc(sizeof(ast_expr_ifelse_t));
-                    stmt->id = (conditional_type == TOKEN_UNLESS) ? EXPR_UNLESSELSE : EXPR_IFELSE;
-                    stmt->source = source;
-                    stmt->label = NULL;
-                    stmt->value = conditional;
-                    stmt->statements = if_stmt_list.statements;
-                    stmt->statements_length = if_stmt_list.length;
-                    stmt->statements_capacity = if_stmt_list.capacity;
-                    stmt->else_statements = else_stmt_list.statements;
-                    stmt->else_statements_length = else_stmt_list.length;
-                    stmt->else_statements_capacity = else_stmt_list.capacity;
-                    stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
-                } else {
-                    if(stmts_mode & PARSE_STMTS_SINGLE) (*i)--;
-                    ast_expr_if_t *stmt = malloc(sizeof(ast_expr_if_t));
-                    stmt->id = (conditional_type == TOKEN_UNLESS) ? EXPR_UNLESS : EXPR_IF;
-                    stmt->source = source;
-                    stmt->label = NULL;
-                    stmt->value = conditional;
-                    stmt->statements = if_stmt_list.statements;
-                    stmt->statements_length = if_stmt_list.length;
-                    stmt->statements_capacity = if_stmt_list.capacity;
-                    stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
-                }
-            }
+        case TOKEN_IF: case TOKEN_UNLESS:
+            if(parse_onetime_conditional(ctx, stmt_list, defer_scope)) return FAILURE;
             break;
         case TOKEN_WHILE: case TOKEN_UNTIL: {
                 unsigned int conditional_type = tokens[*i].id;
@@ -298,11 +201,7 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                     return FAILURE;
                 }
 
-                switch(tokens[(*i)++].id){
-                case TOKEN_BEGIN: stmts_mode = PARSE_STMTS_STANDARD; break;
-                case TOKEN_NEXT:  stmts_mode = PARSE_STMTS_SINGLE;   break;
-                default:
-                    compiler_panic(ctx->compiler, sources[*i - 1], "Expected '{' or ',' after conditional expression");
+                if(parse_block_beginning(ctx, "conditional", &stmts_mode)){
                     ast_expr_free_fully(conditional);
                     return FAILURE;
                 }
@@ -438,11 +337,7 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                     return FAILURE;
                 }
 
-                switch(tokens[(*i)++].id){
-                case TOKEN_BEGIN: stmts_mode = PARSE_STMTS_STANDARD; break;
-                case TOKEN_NEXT:  stmts_mode = PARSE_STMTS_SINGLE;   break;
-                default:
-                    compiler_panic(ctx->compiler, sources[*i - 1], "Expected '{' or ',' after 'each in' expression");
+                if(parse_block_beginning(ctx, "'each in'", &stmts_mode)){
                     ast_type_free_fully(it_type);
                     ast_expr_free_fully(low_array);
                     ast_expr_free_fully(length_limit);
@@ -511,11 +406,7 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                     return FAILURE;
                 }
 
-                switch(tokens[(*i)++].id){
-                case TOKEN_BEGIN: stmts_mode = PARSE_STMTS_STANDARD; break;
-                case TOKEN_NEXT:  stmts_mode = PARSE_STMTS_SINGLE;   break;
-                default:
-                    compiler_panic(ctx->compiler, sources[*i - 1], "Expected '{' or ',' after 'repeat' expression");
+                if(parse_block_beginning(ctx, "'repeat'", &stmts_mode)){
                     ast_expr_free_fully(limit);
                     return FAILURE;
                 }
@@ -804,6 +695,9 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                 stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
             }
             break;
+        case TOKEN_LLVM_ASM:
+            if(parse_llvm_asm(ctx, stmt_list)) return FAILURE;
+            break;
         default:
             parse_panic_token(ctx, sources[*i], tokens[*i].id, "Encountered unexpected token '%s' at beginning of statement");
             return FAILURE;
@@ -901,9 +795,25 @@ errorcode_t parse_stmt_call(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, bool i
         }
     }
 
+    (*i)++;
+
+    if(tokens[*i].id == TOKEN_GIVES){
+        // Skip over '~>'
+        (*i)++;
+
+        if(parse_type(ctx, &stmt->gives)){
+            ctx->ignore_newlines_in_expr_depth--;
+            ast_exprs_free_fully(stmt->args, stmt->arity);
+            free(stmt->name);
+            free(stmt);
+            return FAILURE;
+        }
+    } else {
+        memset(&stmt->gives, 0, sizeof(ast_type_t));
+    }
+
     ctx->ignore_newlines_in_expr_depth--;
     stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
-    (*i)++;
     return SUCCESS;
 }
 
@@ -926,6 +836,16 @@ errorcode_t parse_stmt_declare(parse_ctx_t *ctx, ast_expr_list_t *stmt_list){
     bool is_assign_pod = false;
     ast_expr_t *decl_value = NULL;
     ast_type_t decl_type;
+    bool is_const = false;
+    bool is_static = false;
+
+    if(tokens[*i].id == TOKEN_CONST){
+        is_const = true;
+        (*i)++;
+    } else if(tokens[*i].id == TOKEN_STATIC){
+        is_static = true;
+        (*i)++;
+    }
 
     unsigned int declare_stmt_type = EXPR_DECLARE;
 
@@ -992,6 +912,8 @@ errorcode_t parse_stmt_declare(parse_ctx_t *ctx, ast_expr_list_t *stmt_list){
         stmt->name = decl_names[v];
         stmt->is_pod = is_pod;
         stmt->is_assign_pod = is_assign_pod;
+        stmt->is_static = is_static;
+        stmt->is_const = is_const;
 
         if(v + 1 == length){
             stmt->type = decl_type;
@@ -1150,6 +1072,112 @@ errorcode_t parse_switch(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_sco
     return SUCCESS;
 }
 
+errorcode_t parse_onetime_conditional(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scope_t *defer_scope){
+    token_t *tokens = ctx->tokenlist->tokens;
+    length_t *i = ctx->i;
+
+    unsigned int conditional_type = tokens[*i].id;
+    source_t source = ctx->tokenlist->sources[(*ctx->i)++];
+
+    ast_expr_t *conditional;
+    trait_t stmts_mode;
+
+    if(parse_expr(ctx, &conditional)) return FAILURE;
+
+    if(parse_ignore_newlines(ctx, "Expected '{' or ',' after conditional expression")){
+        ast_expr_free_fully(conditional);
+        return FAILURE;
+    }
+
+    if(parse_block_beginning(ctx, "conditional", &stmts_mode)){
+        ast_expr_free_fully(conditional);
+        return FAILURE;
+    }
+
+    ast_expr_list_t if_stmt_list;
+    if_stmt_list.statements = malloc(sizeof(ast_expr_t*) * 4);
+    if_stmt_list.length = 0;
+    if_stmt_list.capacity = 4;
+
+    defer_scope_t if_defer_scope;
+    defer_scope_init(&if_defer_scope, defer_scope, NULL, TRAIT_NONE);
+
+    if(parse_stmts(ctx, &if_stmt_list, &if_defer_scope, stmts_mode)){
+        ast_free_statements_fully(if_stmt_list.statements, if_stmt_list.length);
+        ast_expr_free_fully(conditional);
+        defer_scope_free(&if_defer_scope);
+        return FAILURE;
+    }
+
+    defer_scope_free(&if_defer_scope);
+
+    if(!(stmts_mode & PARSE_STMTS_SINGLE)) (*i)++;
+
+    // Read ahead of newlines to check for 'else'
+    length_t i_readahead = *i;
+    while(tokens[i_readahead].id == TOKEN_NEWLINE && i_readahead != ctx->tokenlist->length) i_readahead++;
+
+    if(tokens[i_readahead].id == TOKEN_ELSE){
+        *i = i_readahead;
+
+        switch(tokens[++(*i)].id){
+        case TOKEN_NEXT:
+            stmts_mode = PARSE_STMTS_SINGLE;
+            (*i)++; break;
+        case TOKEN_BEGIN:
+            stmts_mode = PARSE_STMTS_STANDARD;
+            (*i)++; break;
+        default:
+            stmts_mode = PARSE_STMTS_SINGLE;
+        }
+
+        ast_expr_list_t else_stmt_list;
+        else_stmt_list.statements = malloc(sizeof(ast_expr_t*) * 4);
+        else_stmt_list.length = 0;
+        else_stmt_list.capacity = 4;
+
+        // Reuse 'if_defer_scope' for else defer scope
+        defer_scope_init(&if_defer_scope, defer_scope, NULL, TRAIT_NONE);
+
+        if(parse_stmts(ctx, &else_stmt_list, &if_defer_scope, stmts_mode)){
+            ast_free_statements_fully(else_stmt_list.statements, else_stmt_list.length);
+            ast_expr_free_fully(conditional);
+            defer_scope_free(&if_defer_scope);
+            return FAILURE;
+        }
+
+        defer_scope_free(&if_defer_scope);
+
+        if(stmts_mode & PARSE_STMTS_SINGLE) (*i)--; else (*i)++;
+
+        ast_expr_ifelse_t *stmt = malloc(sizeof(ast_expr_ifelse_t));
+        stmt->id = (conditional_type == TOKEN_UNLESS) ? EXPR_UNLESSELSE : EXPR_IFELSE;
+        stmt->source = source;
+        stmt->label = NULL;
+        stmt->value = conditional;
+        stmt->statements = if_stmt_list.statements;
+        stmt->statements_length = if_stmt_list.length;
+        stmt->statements_capacity = if_stmt_list.capacity;
+        stmt->else_statements = else_stmt_list.statements;
+        stmt->else_statements_length = else_stmt_list.length;
+        stmt->else_statements_capacity = else_stmt_list.capacity;
+        stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
+    } else {
+        if(stmts_mode & PARSE_STMTS_SINGLE) (*i)--;
+        ast_expr_if_t *stmt = malloc(sizeof(ast_expr_if_t));
+        stmt->id = (conditional_type == TOKEN_UNLESS) ? EXPR_UNLESS : EXPR_IF;
+        stmt->source = source;
+        stmt->label = NULL;
+        stmt->value = conditional;
+        stmt->statements = if_stmt_list.statements;
+        stmt->statements_length = if_stmt_list.length;
+        stmt->statements_capacity = if_stmt_list.capacity;
+        stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
+    }
+
+    return SUCCESS;
+}
+
 errorcode_t parse_assign(parse_ctx_t *ctx, ast_expr_list_t *stmt_list){
     // NOTE: Assumes 'stmt_list' has enough space for another statement
     // NOTE: expand() should've already been used on stmt_list to make room
@@ -1241,6 +1269,152 @@ errorcode_t parse_assign(parse_ctx_t *ctx, ast_expr_list_t *stmt_list){
     return SUCCESS;
 }
 
+errorcode_t parse_llvm_asm(parse_ctx_t *ctx, ast_expr_list_t *stmt_list){
+    // llvm_asm dialect { ... } "contraints" (values)
+    //    ^
+
+    length_t *i = ctx->i;
+    token_t *tokens = ctx->tokenlist->tokens;
+    source_t source = ctx->tokenlist->sources[*i];
+
+    // Eat 'llvm_asm'
+    if(parse_eat(ctx, TOKEN_LLVM_ASM, "Expected 'llvm_asm' keyword for inline LLVM assembly code")) return FAILURE;
+
+    maybe_null_weak_cstr_t maybe_dialect = parse_eat_word(ctx, NULL);
+    troolean is_intel = TROOLEAN_UNKNOWN;
+
+    if(maybe_dialect == NULL){
+        compiler_panicf(ctx->compiler, source, "Expected either intel or att after llvm_asm keyword");
+        return FAILURE;
+    } else if(strcmp(maybe_dialect, "intel") == 0){
+        is_intel = TROOLEAN_TRUE;
+    } else if(strcmp(maybe_dialect, "att") == 0){
+        is_intel = TROOLEAN_FALSE;
+    } else {
+        compiler_panicf(ctx->compiler, ctx->tokenlist->sources[*ctx->i], "Expected either intel or att for LLVM inline assembly dialect");
+        return FAILURE;
+    }
+
+    bool has_side_effects = false;
+    bool is_stack_align = false;
+
+    maybe_null_weak_cstr_t additional_info;
+    
+    while((additional_info = parse_eat_word(ctx, NULL))){
+        if(strcmp(additional_info, "side_effects")){
+            has_side_effects = true;
+        } else if(strcmp(additional_info, "stack_align")){
+            is_stack_align = true;
+        } else {
+            compiler_panicf(ctx->compiler, ctx->tokenlist->sources[*ctx->i], "Unrecognized assembly trait '%s', valid traits are: 'side_effects', 'stack_align'", additional_info);
+            return FAILURE;
+        }
+    }
+
+    strong_cstr_t assembly = NULL;
+    length_t assembly_length = 0;
+    length_t assembly_capacity = 0;
+
+    if(parse_eat(ctx, TOKEN_BEGIN, "Expected '{' after llvm_asm dialect")) return FAILURE;
+
+    while(tokens[*i].id != TOKEN_END){
+        switch(tokens[*i].id){
+        case TOKEN_STRING: {
+                token_string_data_t *string_data = (token_string_data_t*) tokens[*i].data;
+                expand((void**) &assembly, sizeof(char), assembly_length, &assembly_capacity, string_data->length + 2, 512);
+                memcpy(&assembly[assembly_length], string_data->array, string_data->length);
+                assembly_length += string_data->length;
+                assembly[assembly_length++] = '\n';
+                assembly[assembly_length] = '\0';
+            }
+            break;
+        case TOKEN_CSTRING: {
+                char *string = (char*) tokens[*i].data;
+                length_t length = strlen(string);
+                expand((void**) &assembly, sizeof(char), assembly_length, &assembly_capacity, length + 2, 512);
+                memcpy(&assembly[assembly_length], string, length);
+                assembly_length += length;
+                assembly[assembly_length++] = '\n';
+                assembly[assembly_length] = '\0';
+            }
+            break;
+        case TOKEN_NEXT: case TOKEN_NEWLINE:
+            break;
+        default:
+            compiler_panicf(ctx->compiler, ctx->tokenlist->sources[*i], "Expected string or ',' while inside { ... } for inline LLVM assembly");
+            free(assembly);
+            return FAILURE;
+        }
+        
+        if(++(*i) == ctx->tokenlist->length){
+            compiler_panicf(ctx->compiler, ctx->tokenlist->sources[*i], "Expected '}' for inline LLVM assembly before end-of-file");
+            return FAILURE;
+        }
+    }
+
+    maybe_null_weak_cstr_t constraints = parse_grab_string(ctx, "Expected constraints string after '}' for llvm_asm");
+    if(constraints == NULL){
+        free(assembly);
+        return FAILURE;
+    }
+
+    // Move past constraints string
+    (*i)++;
+
+    if(parse_eat(ctx, TOKEN_OPEN, "Expected '(' for beginning of LLVM assembly arguments")){
+        free(assembly);
+        return FAILURE;
+    }
+
+    ast_expr_t **args = NULL;
+    length_t arity = 0;
+    length_t arity_capacity = 0;
+    ast_expr_t *arg;
+
+    while(tokens[*i].id != TOKEN_CLOSE){
+        if(parse_ignore_newlines(ctx, "Expected argument to LLVM assembly") || parse_expr(ctx, &arg)){
+            ast_exprs_free_fully(args, arity);
+            free(assembly);
+            return FAILURE;
+        }
+
+        // Allocate room for more arguments if necessary
+        expand((void**) &args, sizeof(ast_expr_t*), arity, &arity_capacity, 1, 4);
+        args[arity++] = arg;
+        
+        if(parse_ignore_newlines(ctx, "Expected ',' or ')' after argument to LLVM assembly")){
+            ast_exprs_free_fully(args, arity);
+            free(assembly);
+            return FAILURE;
+        }
+
+        if(tokens[*i].id == TOKEN_NEXT){
+            (*i)++;
+        } else if(tokens[*i].id != TOKEN_CLOSE){
+            compiler_panic(ctx->compiler, ctx->tokenlist->sources[*i], "Expected ',' or ')' after after argument to LLVM assembly");
+            ast_exprs_free_fully(args, arity);
+            free(assembly);
+            return FAILURE;
+        }
+    }
+
+    // Move past closing ')'
+    (*i)++;
+
+    ast_expr_llvm_asm_t *stmt = malloc(sizeof(ast_expr_llvm_asm_t));
+    stmt->id = EXPR_LLVM_ASM;
+    stmt->source = source;
+    stmt->assembly = assembly ? assembly : strclone("");
+    stmt->constraints = constraints;
+    stmt->args = args;
+    stmt->arity = arity;
+    stmt->has_side_effects = has_side_effects;
+    stmt->is_stack_align = is_stack_align;
+    stmt->is_intel = (is_intel == TROOLEAN_TRUE);
+    stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
+    return SUCCESS;
+}
+
 errorcode_t parse_local_constant_declaration(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, source_t source){
     // NOTE: Assumes 'stmt_list' has enough space for another statement
     // NOTE: expand() should've already been used on stmt_list to make room
@@ -1248,7 +1422,7 @@ errorcode_t parse_local_constant_declaration(parse_ctx_t *ctx, ast_expr_list_t *
     ast_constant_t constant;
 
     // Parse constant
-    if(parse_constant_declaration(ctx, &constant)) return FAILURE;
+    if(parse_constant_definition(ctx, &constant)) return FAILURE;
 
     // Turn into declare constant statement
     ast_expr_declare_constant_t *stmt = malloc(sizeof(ast_expr_declare_constant_t));
@@ -1257,4 +1431,42 @@ errorcode_t parse_local_constant_declaration(parse_ctx_t *ctx, ast_expr_list_t *
     stmt->constant = constant;
     stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
     return SUCCESS;
+}
+
+errorcode_t parse_block_beginning(parse_ctx_t *ctx, weak_cstr_t block_readable_mother, unsigned int *out_stmts_mode){
+    switch(ctx->tokenlist->tokens[*ctx->i].id){
+    case TOKEN_BEGIN:
+        *out_stmts_mode = PARSE_STMTS_STANDARD;
+        (*ctx->i)++;
+        return SUCCESS;
+    case TOKEN_NEXT:
+        *out_stmts_mode = PARSE_STMTS_SINGLE;
+        (*ctx->i)++;
+        return SUCCESS;
+    case TOKEN_WORD:
+    case TOKEN_BREAK:
+    case TOKEN_CONTINUE:
+    case TOKEN_DEFER:
+    case TOKEN_DELETE:
+    case TOKEN_ELSE:
+    case TOKEN_EXHAUSTIVE:
+    case TOKEN_FOR:
+    case TOKEN_IF:
+    case TOKEN_REPEAT:
+    case TOKEN_RETURN:
+    case TOKEN_SWITCH:
+    case TOKEN_UNLESS:
+    case TOKEN_UNTIL:
+    case TOKEN_VA_ARG:
+    case TOKEN_VA_END:
+    case TOKEN_VA_START:
+    case TOKEN_WHILE:
+        // Specially allowed expression terminators
+        *out_stmts_mode = PARSE_STMTS_SINGLE;
+        return SUCCESS;
+    default:
+        compiler_panicf(ctx->compiler, ctx->tokenlist->sources[*ctx->i - 1], "Expected '{' or ',' after %s expression", block_readable_mother);
+        return FAILURE;
+    }
+    return FAILURE;
 }

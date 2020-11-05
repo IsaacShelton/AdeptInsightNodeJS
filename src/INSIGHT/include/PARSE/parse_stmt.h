@@ -69,17 +69,34 @@ errorcode_t parse_stmt_declare(parse_ctx_t *ctx, ast_expr_list_t *expr_list);
 // Parses a switch statement
 errorcode_t parse_switch(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scope_t *parent_defer_scope, bool is_exhaustive);
 
+// ------------------ parse_onetime_conditional ------------------
+// Parses a onetime-evaluated conditional,
+// such as 'if' or 'unless'
+errorcode_t parse_onetime_conditional(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scope_t *defer_scope);
+
 // ------------------ parse_assign ------------------
 // Parses an assignment statement
 // NOTE: Assumes 'stmt_list' has enough space for another statement
 // NOTE: expand() should be used on stmt_list to make room sometime before calling
 errorcode_t parse_assign(parse_ctx_t *ctx, ast_expr_list_t *stmt_list);
 
+// ------------------ parse_llvm_asm ------------------
+// Parses an inline LLVM assembly statement
+errorcode_t parse_llvm_asm(parse_ctx_t *ctx, ast_expr_list_t *stmt_list);
+
 // ------------------ parse_local_constant_declaration ------------------
 // Parses a local named constant expression declaration
 // NOTE: Assumes 'stmt_list' has enough space for another statement
 // NOTE: expand() should be used on stmt_list to make room sometime before calling
 errorcode_t parse_local_constant_declaration(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, source_t source);
+
+// ------------------ parse_block_begin ------------------
+// Parses the token that begins a block
+// Usually this would be '{' or ','
+// But it can also be things like words and keywords
+// Stores the specified statement mode in 'out_stmts_mode' if successful
+// Returns FAILURE on failure and SUCCESS on success
+errorcode_t parse_block_beginning(parse_ctx_t *ctx, weak_cstr_t block_readable_mother, unsigned int *out_stmts_mode);
 
 #ifdef __cplusplus
 }

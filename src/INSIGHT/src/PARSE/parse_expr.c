@@ -250,6 +250,19 @@ errorcode_t parse_primary_expr(parse_ctx_t *ctx, ast_expr_t **out_expr){
             *out_expr = (ast_expr_t*) va_arg_expr;
         }
         break;
+    case TOKEN_BEGIN: {
+            if(parse_expr_initlist(ctx, out_expr)) return FAILURE;
+        }
+        break;
+    case TOKEN_POLYCOUNT: {
+            ast_expr_polycount_t *polycount_expr = malloc(sizeof(ast_expr_polycount_t));
+            polycount_expr->id = EXPR_POLYCOUNT;
+            polycount_expr->name = tokens[*i].data;
+            tokens[*i].data = NULL;
+            polycount_expr->source = sources[(*i)++];
+            *out_expr = (ast_expr_t*) polycount_expr;
+        }
+        break;
     default:
         parse_panic_token(ctx, sources[*i], tokens[*i].id, "Unexpected token '%s' in expression");
         return FAILURE;
@@ -385,9 +398,23 @@ errorcode_t parse_expr_post(parse_ctx_t *ctx, ast_expr_t **inout_expr){
                         }
                     }
 
+                    if(tokens[++(*i)].id == TOKEN_GIVES){
+                        // Skip over '~>'
+                        (*i)++;
+
+                        if(parse_type(ctx, &call_expr->gives)){
+                            ctx->ignore_newlines_in_expr_depth--;
+                            ast_exprs_free_fully(call_expr->args, call_expr->arity);
+                            free(call_expr->name);
+                            free(call_expr);
+                            return FAILURE;
+                        }
+                    } else {
+                        memset(&call_expr->gives, 0, sizeof(ast_type_t));
+                    }
+
                     ctx->ignore_newlines_in_expr_depth--;
                     *inout_expr = (ast_expr_t*) call_expr;
-                    (*i)++;
                 } else {
                     if(is_tentative){
                         compiler_panic(ctx->compiler, sources[*i - 2], "Cannot have tentative field access");
@@ -460,6 +487,7 @@ errorcode_t parse_op_expr(parse_ctx_t *ctx, int precedence, ast_expr_t **inout_l
             
             // NOTE: Must be sorted
             static const int op_termination_tokens[] = {
+                TOKEN_WORD,               // 0x00000001
                 TOKEN_ASSIGN,             // 0x00000008
                 TOKEN_CLOSE,              // 0x00000011
                 TOKEN_BEGIN,              // 0x00000012
@@ -481,7 +509,24 @@ errorcode_t parse_op_expr(parse_ctx_t *ctx, int precedence, ast_expr_t **inout_l
                 TOKEN_BIT_LGC_RS_ASSIGN,  // 0x00000033
                 TOKEN_TERMINATE_JOIN,     // 0x00000037
                 TOKEN_COLON,              // 0x00000038
+
+                TOKEN_BREAK,              // 0x00000055
+                TOKEN_CONTINUE,           // 0x00000059
+                TOKEN_DEFER,              // 0x0000005C
+                TOKEN_DELETE,             // 0x0000005D
                 TOKEN_ELSE,               // 0x0000005E
+                TOKEN_EXHAUSTIVE,         // 0x00000061
+                TOKEN_FOR,                // 0x00000065
+                TOKEN_IF,                 // 0x0000006A
+                TOKEN_REPEAT,             // 0x00000077
+                TOKEN_RETURN,             // 0x00000078
+                TOKEN_SWITCH,             // 0x0000007D
+                TOKEN_UNLESS,             // 0x00000083
+                TOKEN_UNTIL,              // 0x00000084
+                TOKEN_VA_ARG,             // 0x00000086
+                TOKEN_VA_END,             // 0x00000087
+                TOKEN_VA_START,           // 0x00000089
+                TOKEN_WHILE,              // 0x0000008B
             };
 
             // Terminate operator expression portion if termination operator encountered
@@ -694,9 +739,24 @@ errorcode_t parse_expr_call(parse_ctx_t *ctx, ast_expr_t **out_expr){
         return FAILURE;
     }
 
+    ast_type_t gives;
+
+    if(tokens[++(*i)].id == TOKEN_GIVES){
+        // Skip over '~>'
+        (*i)++;
+
+        if(parse_type(ctx, &gives)){
+            ctx->ignore_newlines_in_expr_depth--;
+            ast_exprs_free_fully(args, arity);
+            free(name);
+            return FAILURE;
+        }
+    } else {
+        memset(&gives, 0, sizeof(ast_type_t));
+    }
+
     ctx->ignore_newlines_in_expr_depth--;
-    ast_expr_create_call(out_expr, name, arity, args, is_tentative, source);
-    (*i)++;
+    ast_expr_create_call(out_expr, name, arity, args, is_tentative, &gives, source);
     return SUCCESS;
 }
 
@@ -1190,6 +1250,59 @@ errorcode_t parse_expr_predecrement(parse_ctx_t *ctx, ast_expr_t **out_expr){
     
     *out_expr = (ast_expr_t*) predecrement_expr;
     return SUCCESS;
+}
+
+errorcode_t parse_expr_initlist(parse_ctx_t *ctx, ast_expr_t **out_expr){
+    // NOTE: Assumes first token is '{'
+    
+    ast_expr_t **values = NULL;
+    length_t length = 0;
+    length_t capacity = 0;
+    source_t source = ctx->tokenlist->sources[(*ctx->i)++];
+
+    token_t *tokens = ctx->tokenlist->tokens;
+    length_t *i = ctx->i;
+
+    if(parse_ignore_newlines(ctx, "Expected '}' or ',' in initializer list before end of file")) return FAILURE;
+
+    while(tokens[*i].id != TOKEN_END){
+        expand((void**) &values, sizeof(ast_expr_t*), length, &capacity, 1, 16);
+
+        // Parse single value
+        if(parse_expr(ctx, &values[length])) goto failed_to_parse_values;
+
+        // Increase number of expressions.
+        // NOTE: This cannot be combined with 'parse_expr' statement, because
+        // whether or not it succeeds influences what expressions
+        // we need to free on failure
+        length++;
+
+        if(parse_ignore_newlines(ctx, "Expected '}' or ',' in initializer list before end of file")) goto failed_to_parse_values;
+
+        if(tokens[*i].id == TOKEN_NEXT){
+            // Allow ',' instead of '}'
+            (*i)++;
+
+            if(parse_ignore_newlines(ctx, "Expected '}' or ',' in initializer list before end of file")) goto failed_to_parse_values;
+        } else if(tokens[*i].id != TOKEN_END){
+            compiler_panic(ctx->compiler, ctx->tokenlist->sources[*i], "Expected '}' or ',' in initializer list");
+            goto failed_to_parse_values;
+        }
+    }
+    // Skip over '}' token
+    (*i)++;
+
+    ast_expr_initlist_t *initlist_expr = malloc(sizeof(ast_expr_initlist_t));
+    initlist_expr->id = EXPR_INITLIST;
+    initlist_expr->source = source;
+    initlist_expr->elements = values;
+    initlist_expr->length = length;
+    *out_expr = (ast_expr_t*) initlist_expr;
+    return SUCCESS;
+
+failed_to_parse_values:
+    ast_exprs_free_fully(values, length);
+    return FAILURE;
 }
 
 int parse_get_precedence(unsigned int id){

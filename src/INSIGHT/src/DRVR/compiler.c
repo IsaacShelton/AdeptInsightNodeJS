@@ -78,14 +78,15 @@ void compiler_invoke(compiler_t *compiler, int argc, char **argv){
 
     if(compiler->location == NULL){
         if(argv == NULL || argv[0] == NULL || strcmp(argv[0], "") == 0){
-    		redprintf("EXTERNAL ERROR: Compiler was invoked with NULL or empty argv[0]\n");
+            redprintf("external-error: ");
+    		printf("Compiler was invoked with NULL or empty argv[0]\n");
     	} else {
             compiler->location = filename_absolute(argv[0]);
         }
     }
 
     if(compiler->location == NULL){
-        redprintf("INTERNAL ERROR: Compiler failed to locate itself\n");
+        internalerrorprintf("Compiler failed to locate itself\n");
         exit(1);
     }
     #endif
@@ -192,6 +193,15 @@ void compiler_init(compiler_t *compiler){
     compiler->show_unused_variables_how_to_disable = false;
     compiler->cross_compile_for = CROSS_COMPILE_NONE;
     compiler->entry_point = "main";
+    compiler->user_linker_options = NULL;
+    compiler->user_linker_options_length = 0;
+    compiler->user_linker_options_capacity = 0;
+    compiler->user_search_paths = NULL;
+    compiler->user_search_paths_length = 0;
+    compiler->user_search_paths_capacity = 0;
+
+    // Allow '::' and ': Type' by default
+    compiler->traits |= COMPILER_COLON_COLON | COMPILER_TYPE_COLON;
 
     tmpbuf_init(&compiler->tmp);
 }
@@ -204,6 +214,8 @@ void compiler_free(compiler_t *compiler){
     free(compiler->location);
     free(compiler->root);
     free(compiler->output_filename);
+    free(compiler->user_linker_options);
+    freestrs(compiler->user_search_paths, compiler->user_search_paths_length);
 
     compiler_free_objects(compiler);
     compiler_free_error(compiler);
@@ -239,7 +251,7 @@ void compiler_free_objects(compiler_t *compiler){
             // Nothing to free up
             break;
         default:
-            printf("INTERNAL ERROR: Failed to delete object that has an invalid compilation stage\n");
+            internalerrorprintf("Failed to delete object that has an invalid compilation stage\n");
         }
 
         free(object); // Free memory that the object is stored in
@@ -382,6 +394,8 @@ errorcode_t parse_arguments(compiler_t *compiler, object_t *object, int argc, ch
                 compiler->traits |= COMPILER_SHORT_WARNINGS;
             } else if(strcmp(argv[arg_index], "-j") == 0){
                 compiler->traits |= COMPILER_NO_REMOVE_OBJECT;
+            } else if(strcmp(argv[arg_index], "-c") == 0){
+                compiler->traits |= COMPILER_NO_REMOVE_OBJECT | COMPILER_EMIT_OBJECT;
             } else if(strcmp(argv[arg_index], "-O0") == 0){
                 compiler->optimization = OPTIMIZATION_NONE;
             } else if(strcmp(argv[arg_index], "-O1") == 0){
@@ -422,7 +436,7 @@ errorcode_t parse_arguments(compiler_t *compiler, object_t *object, int argc, ch
             } else if(strcmp(argv[arg_index], "--pic") == 0 || strcmp(argv[arg_index], "-fPIC") == 0 ||
                         strcmp(argv[arg_index], "-fpic") == 0){
                 // Accessibility versions of --PIC
-                yellowprintf("WARNING: Flag '%s' is not valid, assuming you meant to use --PIC\n", argv[arg_index]);
+                warningprintf("Flag '%s' is not valid, assuming you meant to use --PIC\n", argv[arg_index]);
                 compiler->use_pic = TROOLEAN_TRUE;
             } else if(strcmp(argv[arg_index], "--PIC") == 0){
                 compiler->use_pic = TROOLEAN_TRUE;
@@ -430,13 +444,13 @@ errorcode_t parse_arguments(compiler_t *compiler, object_t *object, int argc, ch
                         strcmp(argv[arg_index], "--nopic") == 0 || strcmp(argv[arg_index], "-fno-pic") == 0 ||
                         strcmp(argv[arg_index], "-fno-PIC") == 0){
                 // Accessibility versions of --no-PIC
-                yellowprintf("WARNING: Flag '%s' is not valid, assuming you meant to use --no-PIC\n", argv[arg_index]);
+                warningprintf("Flag '%s' is not valid, assuming you meant to use --no-PIC\n", argv[arg_index]);
                 compiler->use_pic = TROOLEAN_FALSE;
             } else if(strcmp(argv[arg_index], "--no-PIC") == 0){
                 compiler->use_pic = TROOLEAN_FALSE;
             } else if(strcmp(argv[arg_index], "-lm") == 0){
                 // Accessibility versions of --libm
-                yellowprintf("WARNING: Flag '%s' is not valid, assuming you meant to use --libm\n", argv[arg_index]);
+                warningprintf("Flag '%s' is not valid, assuming you meant to use --libm\n", argv[arg_index]);
                 compiler->use_libm = true;
             } else if(strcmp(argv[arg_index], "--libm") == 0){
                 compiler->use_libm = true;
@@ -446,6 +460,12 @@ errorcode_t parse_arguments(compiler_t *compiler, object_t *object, int argc, ch
             } else if(strncmp(argv[arg_index], "--std=", 6) == 0){
                 compiler->default_stdlib = &argv[arg_index][6];
                 compiler->traits |= COMPILER_FORCE_STDLIB;
+            } else if(strcmp(argv[arg_index], "--entry") == 0){
+                if(arg_index + 1 == argc){
+                    redprintf("Expected entry point after '--entry' flag\n");
+                    return FAILURE;
+                }
+                compiler->entry_point = argv[++arg_index];
             } else if(strcmp(argv[arg_index], "--repl") == 0){
                 compiler->traits |= COMPILER_REPL;
             } else if(strcmp(argv[arg_index], "--windows") == 0){
@@ -458,6 +478,19 @@ errorcode_t parse_arguments(compiler_t *compiler, object_t *object, int argc, ch
                 printf("[-] Cross compiling for MacOS x86_64\n");
                 compiler->cross_compile_for = CROSS_COMPILE_MACOS;
                 #endif
+            } else if(argv[arg_index][0] == '-' && (argv[arg_index][1] == 'L' || argv[arg_index][1] == 'l')){
+                // Forward argument to linker
+                compiler_add_user_linker_option(compiler, argv[arg_index]);
+            } else if(argv[arg_index][0] == '-' && argv[arg_index][1] == 'I'){
+                if(argv[arg_index][2] == '\0'){
+                    if(arg_index + 1 == argc){
+                        redprintf("Expected search path after '-I' flag\n");
+                        return FAILURE;
+                    }
+                    compiler_add_user_search_path(compiler, argv[++arg_index], NULL);
+                } else {
+                    compiler_add_user_search_path(compiler, &argv[arg_index][2], NULL);
+                }
             }
             
             #ifdef ENABLE_DEBUG_FEATURES //////////////////////////////////
@@ -472,7 +505,10 @@ errorcode_t parse_arguments(compiler_t *compiler, object_t *object, int argc, ch
                 compiler->debug_traits |= COMPILER_DEBUG_LLVMIR;
             } else if(strcmp(argv[arg_index], "--no-verification") == 0){
                 compiler->debug_traits |= COMPILER_DEBUG_NO_VERIFICATION;
+            } else if(strcmp(argv[arg_index], "--no-result") == 0){
+                compiler->debug_traits |= COMPILER_DEBUG_NO_RESULT;
             }
+
             #endif // ENABLE_DEBUG_FEATURES ///////////////////////////////
 
             else {
@@ -505,7 +541,7 @@ errorcode_t parse_arguments(compiler_t *compiler, object_t *object, int argc, ch
 
             if(object->full_filename == NULL){
                 object->compilation_stage = COMPILATION_STAGE_NONE;
-                redprintf("INTERNAL ERROR: Failed to get absolute path of filename '%s'\n", object->filename);
+                internalerrorprintf("Failed to get absolute path of filename '%s'\n", object->filename);
                 free(object->filename);
                 return FAILURE;
             }
@@ -529,7 +565,7 @@ errorcode_t parse_arguments(compiler_t *compiler, object_t *object, int argc, ch
 
             if(object->full_filename == NULL){
                 object->compilation_stage = COMPILATION_STAGE_NONE;
-                redprintf("INTERNAL ERROR: Failed to get absolute path of filename '%s'\n", object->filename);
+                internalerrorprintf("Failed to get absolute path of filename '%s'\n", object->filename);
                 free(object->filename);
                 return FAILURE;
             }
@@ -636,16 +672,20 @@ void show_help(bool show_advanced_options){
         printf("    -d                Include debugging symbols [UNIMPLEMENTED]\n");
     }
 
-
-    if(show_advanced_options)
+    printf("    -c                Emit object file\n");
+    if(show_advanced_options){
         printf("    -j                Preserve generated object file\n");
+        printf("    -I<PATH>          Add directory to import search path\n");
+        printf("    -L<PATH>          Add directory to native library search path\n");
+        printf("    -l<LIBRARY>       Link against native library\n");
+    }
     
     printf("    -O0,-O1,-O2,-O3   Set optimization level\n");
     printf("    -std=2.x          Set standard library version\n");
     
     if(show_advanced_options)
         printf("    --fussy           Show insignificant warnings\n");
-    
+
     printf("    --version         Display compiler version\n");
     printf("    --help-advanced   Show lesser used compiler flags\n");
 
@@ -656,6 +696,7 @@ void show_help(bool show_advanced_options){
         printf("    --unsafe-meta     Allow unsafe usage of meta constructs\n");
         printf("    --unsafe-new      Disables zero-initialization of memory allocated with new\n");
         printf("    --null-checks     Enable runtime null-checks\n");
+        printf("    --entry           Set the entry point of the program\n");
 
         printf("\nMachine Code Options:\n");
         printf("    --PIC             Forces PIC relocation model\n");
@@ -741,6 +782,35 @@ strong_cstr_t compiler_get_string(){
     return mallocandsprintf("Adept %s - Build %s %s CDT", ADEPT_VERSION_STRING, __DATE__, __TIME__);
 }
 
+void compiler_add_user_linker_option(compiler_t *compiler, weak_cstr_t option){
+    length_t length = strlen(option);
+
+    expand((void**) &compiler->user_linker_options, sizeof(char), compiler->user_linker_options_length,
+        &compiler->user_linker_options_capacity, length + 2, 512);
+    
+    compiler->user_linker_options[compiler->user_linker_options_length++] = ' ';
+    memcpy(&compiler->user_linker_options[compiler->user_linker_options_length], option, length + 1);
+    compiler->user_linker_options_length += length;
+}
+
+void compiler_add_user_search_path(compiler_t *compiler, weak_cstr_t search_path, maybe_null_weak_cstr_t current_file){
+    expand((void**) &compiler->user_search_paths, sizeof(weak_cstr_t), compiler->user_search_paths_length,
+        &compiler->user_search_paths_capacity, 1, 4);
+
+    if(current_file == NULL){
+        // Add absolute / cwd relative path
+        compiler->user_search_paths[compiler->user_search_paths_length++] = strclone(search_path);
+    } else {
+        // Add file relative path
+        strong_cstr_t current_path = filename_path(current_file);
+        compiler->user_search_paths[compiler->user_search_paths_length++] = mallocandsprintf("%s%s", current_path, search_path);
+        free(current_path);
+
+        // Add absolute / cwd relative path
+        compiler->user_search_paths[compiler->user_search_paths_length++] = strclone(search_path);
+    }
+}
+
 errorcode_t compiler_create_package(compiler_t *compiler, object_t *object){
     char *package_filename;
 
@@ -796,7 +866,7 @@ void compiler_print_source(compiler_t *compiler, int line, source_t source){
     }
 
     char prefix[128];
-    sprintf(prefix, "%d|", line);
+    sprintf(prefix, "  %d| ", line);
     length_t prefix_length = strlen(prefix);
     printf("%s", prefix);
 
@@ -820,31 +890,37 @@ void compiler_print_source(compiler_t *compiler, int line, source_t source){
     for(length_t i = line_index; i != source.index; i++) printf(relevant_object->buffer[i] != '\t' ? " " : "    ");
 
     for(length_t i = 0; i != source.stride; i++)
-        printf("^");
+        whiteprintf("^");
     printf("\n");
 }
 
 void compiler_panic(compiler_t *compiler, source_t source, const char *message){
-    #if defined(ADEPT_INSIGHT_BUILD) && !defined(__EMSCRIPTEN__)
+    #if !defined(ADEPT_INSIGHT_BUILD) || defined(__EMSCRIPTEN__)
     object_t *relevant_object = compiler->objects[source.object_index];
     int line, column;
 
     if(message == NULL){
         if(relevant_object->traits & OBJECT_PACKAGE){
-            redprintf("%s:?:?:\n", filename_name_const(relevant_object->filename));
+            printf("%s:?:?:", filename_name_const(relevant_object->filename));
+            redprintf(" error:\n");
         } else {
             lex_get_location(relevant_object->buffer, source.index, &line, &column);
-            redprintf("%s:%d:%d:\n", filename_name_const(relevant_object->filename), line, column);
+            printf("%s:%d:%d:", filename_name_const(relevant_object->filename), line, column);
+            redprintf(" error:\n");
             compiler_print_source(compiler, line, source);
         }
         return;
     }
 
     if(relevant_object->traits & OBJECT_PACKAGE){
-        redprintf("%s:?:?: %s!\n", filename_name_const(relevant_object->filename), message);
+        printf("%s:?:?: ", filename_name_const(relevant_object->filename));
+        redprintf("error: ");
+        printf("%s\n", message);
     } else {
         lex_get_location(relevant_object->buffer, source.index, &line, &column);
-        redprintf("%s:%d:%d: %s!\n", filename_name_const(relevant_object->filename), line, column, message);
+        printf("%s:%d:%d: ", filename_name_const(relevant_object->filename), line, column);
+        redprintf("error: ");
+        printf("%s\n", message);
         compiler_print_source(compiler, line, source);
     }
     #endif // !ADEPT_INSIGHT_BUILD
@@ -871,14 +947,15 @@ void compiler_vpanicf(compiler_t *compiler, source_t source, const char *format,
     va_copy(error_format_args, args);
 
     #if !defined(ADEPT_INSIGHT_BUILD) || defined(__EMSCRIPTEN__)
-    terminal_set_color(TERMINAL_COLOR_RED);
 
     if(format == NULL){
         if(relevant_object->traits & OBJECT_PACKAGE){
-            redprintf("%s:?:?:\n", filename_name_const(relevant_object->filename));
+            printf("%s:?:?: ", filename_name_const(relevant_object->filename));
+            redprintf("error: \n");
         } else {
             lex_get_location(relevant_object->buffer, source.index, &line, &column);
-            redprintf("%s:%d:%d:\n", filename_name_const(relevant_object->filename), line, column);
+            printf("%s:%d:%d: ", filename_name_const(relevant_object->filename), line, column);
+            redprintf("error: \n");
             compiler_print_source(compiler, line, source);
         }
         return;
@@ -893,9 +970,9 @@ void compiler_vpanicf(compiler_t *compiler, source_t source, const char *format,
         printf("%s:%d:%d: ", filename_name_const(relevant_object->filename), line, column);
     }
 
+    redprintf("error: ");
     vprintf(format, args);
-    printf("!\n");
-    terminal_set_color(TERMINAL_COLOR_DEFAULT);
+    printf("\n");
 
     compiler_print_source(compiler, line, source);
     #endif // !ADEPT_INSIGHT_BUILD
@@ -923,7 +1000,9 @@ bool compiler_warn(compiler_t *compiler, source_t source, const char *message){
     object_t *relevant_object = compiler->objects[source.object_index];
     int line, column;
     lex_get_location(relevant_object->buffer, source.index, &line, &column);
-    yellowprintf("%s:%d:%d: %s\n", filename_name_const(relevant_object->filename), line, column, message);
+    printf("%s:%d:%d: ", filename_name_const(relevant_object->filename), line, column);
+    yellowprintf("warning: ");
+    printf("%s\n", message);
 
     if(!(compiler->traits & COMPILER_SHORT_WARNINGS)){
         compiler_print_source(compiler, line, source);
@@ -964,7 +1043,6 @@ void compiler_vwarnf(compiler_t *compiler, source_t source, const char *format, 
     va_copy(warning_format_args, args);
     
     #if !defined(ADEPT_INSIGHT_BUILD) || defined(__EMSCRIPTEN__)
-    terminal_set_color(TERMINAL_COLOR_YELLOW);
 
     if(relevant_object->traits & OBJECT_PACKAGE){
         line = 1;
@@ -975,10 +1053,9 @@ void compiler_vwarnf(compiler_t *compiler, source_t source, const char *format, 
         printf("%s:%d:%d: ", filename_name_const(relevant_object->filename), line, column);
     }
 
+    yellowprintf("warning: ");
     vprintf(format, args);
     printf("\n");
-
-    terminal_set_color(TERMINAL_COLOR_DEFAULT);
 
     if(!(compiler->traits & COMPILER_SHORT_WARNINGS)){
         compiler_print_source(compiler, line, source);
@@ -993,9 +1070,13 @@ void compiler_vwarnf(compiler_t *compiler, source_t source, const char *format, 
 
 #if !defined(ADEPT_INSIGHT_BUILD) || defined(__EMSCRIPTEN__)
 void compiler_undeclared_function(compiler_t *compiler, object_t *object, source_t source,
-        const char *name, ast_type_t *types, length_t arity){
+        const char *name, ast_type_t *types, length_t arity, ast_type_t *gives){
     
-    bool has_potential_candidates = compiler_undeclared_function_possiblities(object, &compiler->tmp, name, false);
+    bool has_potential_candidates = compiler_undeclared_function_possibilities(object, &compiler->tmp, name, false);
+
+    // Allow for '.elements_length' to be zero
+    // to indicate no return matching
+    if(gives->elements_length == 0) gives = NULL;
 
     if(!has_potential_candidates){
         // No other function with that name exists
@@ -1004,16 +1085,18 @@ void compiler_undeclared_function(compiler_t *compiler, object_t *object, source
     } else {
         // Other functions have the same name
         char *args_string = make_args_string(types, NULL, arity, TRAIT_NONE);
-        compiler_panicf(compiler, source, "Undeclared function %s(%s)", name, args_string ? args_string : "");
+        char *gives_string = gives ? ast_type_str(gives) : NULL;
+        compiler_panicf(compiler, source, "Undeclared function %s(%s)%s%s", name, args_string ? args_string : "", gives ? " ~> " : "", gives ? gives_string : "");
+        free(gives_string);
         free(args_string);
 
         printf("\nPotential Candidates:\n");
     }
 
-    compiler_undeclared_function_possiblities(object, &compiler->tmp, name, true);
+    compiler_undeclared_function_possibilities(object, &compiler->tmp, name, true);
 }
 
-bool compiler_undeclared_function_possiblities(object_t *object, tmpbuf_t *tmpbuf, const char *name, bool should_print){
+bool compiler_undeclared_function_possibilities(object_t *object, tmpbuf_t *tmpbuf, const char *name, bool should_print){
     weak_cstr_t try_name;
 
     if(object->current_namespace){
@@ -1158,7 +1241,7 @@ void compiler_undeclared_method(compiler_t *compiler, object_t *object, source_t
             if(generics_match_up) for(length_t i = 0; i != maybe_generic_base->generics_length; i++){
                 if(!ast_types_identical(&maybe_generic_base->generics[i], &generic_base_method->generics[i])){
                     // && !ast_type_has_polymorph(&generic_base_method->generics[i])
-                    // is unnessary because generic_base_methods my themselves will never contain polymorphic type variables
+                    // is unnecessary because generic_base_methods my themselves will never contain polymorphic type variables
                     generics_match_up = false;
                     break;
                 }
@@ -1292,7 +1375,7 @@ void object_panicf_plain(object_t *object, const char *format, ...){
     printf("%s: ", filename_name_const(object->filename));
 
     vprintf(format, args);
-    printf("!\n");
+    printf("\n");
     terminal_set_color(TERMINAL_COLOR_DEFAULT);
 
     va_end(args);
@@ -1322,4 +1405,17 @@ void compiler_create_warning(compiler_t *compiler, strong_cstr_t message, source
 void adept_warnings_free_fully(adept_warning_t *warnings, length_t length){
     for(length_t i = 0; i != length; i++) free(warnings[i].message);
     free(warnings);
+}
+
+weak_cstr_t compiler_unnamespaced_name(weak_cstr_t input){
+    length_t i = 0;
+    length_t beginning = 0;
+
+    while(true){
+        char tmp = input[i++];
+        if(tmp == '\0') return &input[beginning];
+        if(tmp == '\\') beginning = i;
+    }
+
+    return NULL; // [unreachable]
 }

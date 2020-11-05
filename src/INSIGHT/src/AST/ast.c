@@ -1,6 +1,7 @@
 
 #include "AST/ast.h"
 #include "UTIL/util.h"
+#include "UTIL/color.h"
 #include "DRVR/compiler.h"
 
 void ast_init(ast_t *ast, unsigned int cross_compile_for){
@@ -186,6 +187,7 @@ void ast_free_functions(ast_func_t *functions, length_t functions_length){
         ast_free_statements(func->statements, func->statements_length);
         free(func->statements);
         ast_type_free(&func->return_type);
+        free(func->export_as);
     }
 }
 
@@ -257,7 +259,7 @@ void ast_dump(ast_t *ast, const char *filename){
     length_t i;
 
     if(file == NULL){
-        printf("INTERNAL ERROR: Failed to open ast dump file\n");
+        internalerrorprintf("Failed to open ast dump file\n");
         return;
     }
 
@@ -405,8 +407,11 @@ void ast_dump_statements(FILE *file, ast_expr_t **statements, length_t length, l
             break;
         case EXPR_DECLARE: case EXPR_DECLAREUNDEF: {
                 bool is_undef = statements[s]->id == EXPR_DECLAREUNDEF;
-
                 ast_expr_declare_t *declare_stmt = (ast_expr_declare_t*) statements[s];
+
+                if(declare_stmt->is_const)  fprintf(file, "const ");
+                if(declare_stmt->is_static) fprintf(file, "static ");
+
                 char *variable_type_str = ast_type_str(&declare_stmt->type);
                 fprintf(file, (declare_stmt->value == NULL && !is_undef) ? "%s %s\n" : "%s %s = ", declare_stmt->name, variable_type_str);
                 free(variable_type_str);
@@ -625,6 +630,13 @@ void ast_dump_statements(FILE *file, ast_expr_t **statements, length_t length, l
                 free(src_str);
             }
             break;
+        case EXPR_LLVM_ASM: {
+                ast_expr_llvm_asm_t *llvm_asm_stmt = (ast_expr_llvm_asm_t*) statements[s];
+                char *assembly = string_to_escaped_string(llvm_asm_stmt->assembly, strlen(llvm_asm_stmt->assembly), '\"');
+                fprintf(file, "llvm_asm ... { \"%s\" } ... (...)\n", assembly);
+                free(assembly);
+            }
+            break;
         default:
             fprintf(file, "<unknown statement>\n");
         }
@@ -658,7 +670,7 @@ void ast_dump_structs(FILE *file, ast_struct_t *structs, length_t structs_length
             fields_string[fields_string_length + name_length] = ' ';
             memcpy(&fields_string[fields_string_length + name_length + 1], typename, typename_length);
 
-            // Some unnecessary copying of '\0', but whatever it doens't really matter cause
+            // Some unnecessary copying of '\0', but whatever it doesn't really matter cause
             //     this is just ast dump code
             if(f + 1 == structure->field_count){
                 fields_string[fields_string_length + name_length + 1 + typename_length] = '\0';
@@ -723,7 +735,9 @@ void ast_dump_enums(FILE *file, ast_enum_t *enums, length_t enums_length){
     }
 }
 
-void ast_func_create_template(ast_func_t *func, strong_cstr_t name, bool is_stdcall, bool is_foreign, bool is_verbatim, source_t source, bool is_entry){
+void ast_func_create_template(ast_func_t *func, strong_cstr_t name, bool is_stdcall, bool is_foreign, bool is_verbatim,
+        bool is_implicit, source_t source, bool is_entry, maybe_null_strong_cstr_t export_as){
+    
     func->name = name;
     func->arg_names = NULL;
     func->arg_types = NULL;
@@ -743,18 +757,21 @@ void ast_func_create_template(ast_func_t *func, strong_cstr_t name, bool is_stdc
     func->statements_length = 0;
     func->statements_capacity = 0;
     func->source = source;
+    func->export_as = export_as;
 
     if(is_entry)                       func->traits |= AST_FUNC_MAIN;
     if(strcmp(name, "__defer__") == 0) func->traits |= AST_FUNC_DEFER | (is_verbatim ? TRAIT_NONE : AST_FUNC_AUTOGEN);
     if(strcmp(name, "__pass__") == 0)  func->traits |= AST_FUNC_PASS  | (is_verbatim ? TRAIT_NONE : AST_FUNC_AUTOGEN);
     if(is_stdcall)                     func->traits |= AST_FUNC_STDCALL;
     if(is_foreign)                     func->traits |= AST_FUNC_FOREIGN;
+    if(is_implicit)                    func->traits |= AST_FUNC_IMPLICIT;
 }
 
 bool ast_func_is_polymorphic(ast_func_t *func){
     for(length_t i = 0; i != func->arity; i++){
         if(ast_type_has_polymorph(&func->arg_types[i])) return true;
     }
+    if(ast_type_has_polymorph(&func->return_type)) return true;
     return false;
 }
 
@@ -795,7 +812,7 @@ void ast_enum_init(ast_enum_t *inum,  weak_cstr_t name, weak_cstr_t *kinds, leng
 }
 
 ast_struct_t *ast_struct_find_exact(ast_t *ast, const char *name){
-    // TODO: Maybe sort and do a binary serach or something
+    // TODO: Maybe sort and do a binary search or something
     for(length_t i = 0; i != ast->structs_length; i++){
         if(strcmp(ast->structs[i].name, name) == 0){
             return &ast->structs[i];
@@ -815,7 +832,7 @@ successful_t ast_struct_find_field(ast_struct_t *ast_struct, const char *name, l
 }
 
 ast_polymorphic_struct_t *ast_polymorphic_struct_find_exact(ast_t *ast, const char *name){
-    // TODO: Maybe sort and do a binary serach or something
+    // TODO: Maybe sort and do a binary search or something
     for(length_t i = 0; i != ast->polymorphic_structs_length; i++){
         if(strcmp(ast->polymorphic_structs[i].name, name) == 0){
             return &ast->polymorphic_structs[i];
@@ -983,7 +1000,7 @@ void va_args_inject_ast(compiler_t *compiler, ast_t *ast){
         
         if(sizeof(va_list) != 24){
             // Neglect whether to terminate, since this is not a fixable warning
-            compiler_warnf(compiler, NULL_SOURCE, "WARNING: Assuming Intel x86_64 va_list\n");
+            compiler_warnf(compiler, NULL_SOURCE, "Assuming Intel x86_64 va_list\n");
         }
 
         strong_cstr_t *names = malloc(sizeof(strong_cstr_t) * 4);

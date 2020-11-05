@@ -7,11 +7,11 @@ INSIGHT_INCLUDE=$(SRCDIR)/INSIGHT/include
 EXPORTED_FUNCTIONS=['_server_main', '_malloc', '_free']
 INSIGHT=obj/insight.a
 
-develop: insight out-directories
-	emcc $(SOURCES) -DADEPT_INSIGHT_BUILD -I"$(INCLUDE)" -I"$(INSIGHT_INCLUDE)" -s FORCE_FILESYSTEM=1 -s "EXPORTED_FUNCTIONS=$(EXPORTED_FUNCTIONS)" -s --pre-js js/pre.js --post-js js/post.js $(INSIGHT) -lnodefs.js -o bin/main.js
-
 release: insight  out-directories
 	emcc $(SOURCES) -DADEPT_INSIGHT_BUILD -I"$(INCLUDE)" -I"$(INSIGHT_INCLUDE)" -s FORCE_FILESYSTEM=1 -s "EXPORTED_FUNCTIONS=$(EXPORTED_FUNCTIONS)" -s --pre-js js/pre.js $(INSIGHT) -lnodefs.js -o bin/insight_server.js
+
+develop: insight out-directories
+	emcc $(SOURCES) -DADEPT_INSIGHT_BUILD -I"$(INCLUDE)" -I"$(INSIGHT_INCLUDE)" -s FORCE_FILESYSTEM=1 -s "EXPORTED_FUNCTIONS=$(EXPORTED_FUNCTIONS)" -s --pre-js js/pre.js --post-js js/post.js $(INSIGHT) -lnodefs.js -o bin/main.js -g
 
 only-run:
 	node bin/main.js

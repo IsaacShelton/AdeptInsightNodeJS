@@ -10,11 +10,13 @@ void query_init(query_t *query){
     query->kind = QUERY_KIND_UNRECOGNIZED;
     query->infrastructure = NULL;
     query->filename = NULL;
+    query->code = NULL;
 }
 
 void query_free(query_t *query){
     free(query->filename);
     free(query->infrastructure);
+    free(query->code);
 }
 
 successful_t query_parse(weak_cstr_t json, query_t *out_query, strong_cstr_t *out_error){
@@ -86,6 +88,20 @@ successful_t query_parse(weak_cstr_t json, query_t *out_query, strong_cstr_t *ou
             }
             
             out_query->filename = strclone(tmp);
+        } else if(strcmp(key, "code") == 0){
+            // "code" : "..."
+
+            strong_cstr_t escaped_code_string;
+            if(!jsmn_helper_get_vstring(json, tokens, required_tokens, section_token_index, &escaped_code_string)){
+                *out_error = mallocandsprintf("Expected string value for '%s'", key);
+                goto cleanup_and_fail;
+            }
+            printf("before: %s\n", escaped_code_string);
+
+            strong_cstr_t unescaped_code_string = unescape_code_string(escaped_code_string);
+            free(escaped_code_string);
+            out_query->code = unescaped_code_string;
+            printf("after: %s\n", unescaped_code_string);
         } else {
             // "???" : "???"
             if(out_error) *out_error = mallocandsprintf("Unrecognized key '%s'", key);
@@ -111,4 +127,44 @@ successful_t query_set_kind_by_name(query_t *out_query, weak_cstr_t kind_name){
     }
 
     return false;
+}
+
+strong_cstr_t unescape_code_string(weak_cstr_t escaped){
+    // From: "    \nprint(\"Isaac says \\\"Hello\\\"\"   "
+    
+    // \n -> newline
+    // \" -> quote
+    // \\ -> backslash
+
+    strong_cstr_t result = NULL;
+    length_t length = 0;
+    length_t capacity = 0;
+
+    char *s = escaped;
+
+    while(*s){
+        expand((void**) &result, sizeof(char), length, &capacity, 1, 4096);
+        if(*s != '\\'){
+            result[length++] = *(s++);
+            continue;
+        }
+
+        switch(*(++s)){
+        case 'n':  result[length++] = '\n'; break;
+        case 't':  result[length++] = '\t'; break;
+        case '"':  result[length++] = '"';  break;
+        case '\\': result[length++] = '\\'; break;
+        case '\'': result[length++] = '\''; break;
+        default:
+            printf("AdeptInsightNodeJS internal error: unescape_code_string() got bad escape code %c\n", *s);
+            s--;
+        }
+
+        s++;
+    }
+
+    expand((void**) &result, sizeof(char), length, &capacity, 2, 4096);
+    result[length++] = '\n';
+    result[length++] = '\0';
+    return result;
 }

@@ -13,7 +13,8 @@
 {
 	"query": "validate",
 	"infrastructure": "/Users/isaac/Projects/Adept/bin/",
-	"filename": "/Users/isaac/main.adept"
+	"filename": "/Users/isaac/main.adept",
+	"code": "import basics\n\nfunc main {\n    print(\"Isaac says: \\\"Hello World!\\\"\")\n}\n"
 }
 ```
 #### ValidationResponse

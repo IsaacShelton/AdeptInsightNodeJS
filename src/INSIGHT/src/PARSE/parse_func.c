@@ -19,9 +19,10 @@ errorcode_t parse_func(parse_ctx_t *ctx){
     }
 
     strong_cstr_t name;
-    bool is_stdcall, is_foreign, is_verbatim;
+    maybe_null_strong_cstr_t export_name; 
+    bool is_stdcall, is_foreign, is_verbatim, is_implicit;
     
-    if(parse_func_head(ctx, &name, &is_stdcall, &is_foreign, &is_verbatim)) return FAILURE;
+    if(parse_func_head(ctx, &name, &is_stdcall, &is_foreign, &is_verbatim, &is_implicit, &export_name)) return FAILURE;
 
     if(is_foreign && ctx->struct_association != NULL){
         compiler_panicf(ctx->compiler, source, "Cannot declare foreign function within struct domain");
@@ -33,7 +34,7 @@ errorcode_t parse_func(parse_ctx_t *ctx){
     length_t ast_func_id = ast->funcs_length;
     ast_func_t *func = &ast->funcs[ast->funcs_length++];
     bool is_entry = strcmp(name, ctx->compiler->entry_point) == 0;
-    ast_func_create_template(func, name, is_stdcall, is_foreign, is_verbatim, source, is_entry);
+    ast_func_create_template(func, name, is_stdcall, is_foreign, is_verbatim, is_implicit, source, is_entry, export_name);
 
     if(ctx->next_builtin_traits != TRAIT_NONE){
         func->traits |= ctx->next_builtin_traits;
@@ -56,7 +57,7 @@ errorcode_t parse_func(parse_ctx_t *ctx){
         }
     }
     
-    // enforce specific arguements for special functions & methods
+    // enforce specific arguments for special functions & methods
     if(func->traits == AST_FUNC_DEFER && (
         !ast_type_is_void(&func->return_type)
         || func->arity != 1
@@ -144,6 +145,27 @@ errorcode_t parse_func(parse_ctx_t *ctx){
         *ctx->ast->common.ast_variadic_array = ast_type_clone(&func->return_type);
         ctx->ast->common.ast_variadic_source = func->source;
     }
+
+    if(strcmp(func->name, "__initializer_list__") == 0){
+        if(ast_type_is_void(&func->return_type)){
+            compiler_panic(ctx->compiler, source, "The function __initializer_list__ must return a value");
+            return FAILURE;
+        }
+
+        if(func->traits != TRAIT_NONE
+        || func->arity != 2
+        || !ast_type_is_base_of(&func->arg_types[1], "usize")
+        || func->arg_type_traits[0] != TRAIT_NONE
+        || func->arg_type_traits[1] != TRAIT_NONE
+        ){
+            compiler_panic(ctx->compiler, source, "Special function __initializer_list__ must be declared like:\n'__initializer_list__(array *$T, length usize) <$T> ReturnType'");
+            return FAILURE;
+        }
+
+        ctx->ast->common.ast_initializer_list = malloc(sizeof(ast_type_t));
+        *ctx->ast->common.ast_initializer_list = ast_type_clone(&func->return_type);
+        ctx->ast->common.ast_initializer_list_source = func->source;
+    }
     
     static const char *math_management_funcs[] = {
         "__add__", "__divide__", "__equals__", "__greater_than__",
@@ -197,13 +219,18 @@ errorcode_t parse_func(parse_ctx_t *ctx){
     return SUCCESS;
 }
 
-errorcode_t parse_func_head(parse_ctx_t *ctx, strong_cstr_t *out_name, bool *out_is_stdcall, bool *out_is_foreign, bool *out_is_verbatim){
-    parse_func_prefixes(ctx, out_is_stdcall, out_is_verbatim);
+errorcode_t parse_func_head(parse_ctx_t *ctx, strong_cstr_t *out_name, bool *out_is_stdcall,
+        bool *out_is_foreign, bool *out_is_verbatim, bool *out_is_implicit, maybe_null_strong_cstr_t *out_export_name){
+    
+    bool is_external;
+    parse_func_prefixes(ctx, out_is_stdcall, out_is_verbatim, out_is_implicit, &is_external);
 
     tokenid_t id = ctx->tokenlist->tokens[(*ctx->i)++].id;
     *out_is_foreign = (id == TOKEN_FOREIGN);
 
     if(*out_is_foreign || id == TOKEN_FUNC){
+        *out_export_name = parse_eat_string(ctx, NULL);
+        
         if(ctx->compiler->traits & COMPILER_COLON_COLON && ctx->prename){
             *out_name = ctx->prename;
             ctx->prename = NULL;
@@ -214,6 +241,13 @@ errorcode_t parse_func_head(parse_ctx_t *ctx, strong_cstr_t *out_name, bool *out
         }
 
         if(*out_name == NULL) return FAILURE;
+
+        // Form export name if applicable
+        if(*out_export_name){
+            *out_export_name = strclone(*out_export_name);
+        } else if(is_external){
+            *out_export_name = strclone(*out_name);
+        }
 
         // If not in struct association, then prepend current namespace
         if(ctx->struct_association == NULL) parse_prepend_namespace(ctx, out_name);
@@ -593,24 +627,35 @@ void parse_func_grow_arguments(ast_func_t *func, length_t backfill, length_t *ca
         grow((void**) &func->arg_defaults, sizeof(ast_expr_t*), func->arity + backfill, *capacity);
 }
 
-void parse_func_prefixes(parse_ctx_t *ctx, bool *out_is_stdcall, bool *out_is_verbatim){
+void parse_func_prefixes(parse_ctx_t *ctx, bool *out_is_stdcall, bool *out_is_verbatim, bool *out_is_implicit, bool *out_is_external){
     tokenid_t token_id = ctx->tokenlist->tokens[*ctx->i].id;
 
     *out_is_stdcall = false;
     *out_is_verbatim = false;
+    *out_is_implicit = false;
+    *out_is_external = false;
 
     // NOTE: Duplicates are allowed, maybe they shouldn't be or does it really matter?
     while(true){
-        if(token_id == TOKEN_STDCALL){
+        switch(token_id){
+        case TOKEN_STDCALL:
             token_id = ctx->tokenlist->tokens[++(*ctx->i)].id;
             *out_is_stdcall = true;
             continue;
-        }
-        if(token_id == TOKEN_VERBATIM){
+        case TOKEN_VERBATIM:
             token_id = ctx->tokenlist->tokens[++(*ctx->i)].id;
             *out_is_verbatim = true;
             continue;
+        case TOKEN_IMPLICIT:
+            token_id = ctx->tokenlist->tokens[++(*ctx->i)].id;
+            *out_is_implicit = true;
+            continue;
+        case TOKEN_EXTERNAL:
+            token_id = ctx->tokenlist->tokens[++(*ctx->i)].id;
+            *out_is_external = true;
+            continue;
         }
+
         return;
     }
 

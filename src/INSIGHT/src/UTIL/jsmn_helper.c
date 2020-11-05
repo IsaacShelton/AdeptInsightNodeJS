@@ -1,4 +1,5 @@
 
+#include "UTIL/color.h"
 #include "UTIL/jsmn_helper.h"
 
 void jsmn_helper_print_token(weak_cstr_t buffer, jsmntok_t token){
@@ -40,14 +41,14 @@ void jsmn_helper_print_tokens(jsmntok_t *tokens, length_t length){
 successful_t jsmn_helper_get_object(weak_cstr_t buffer, jsmntok_t *tokens, length_t num_tokens, length_t index){
     if(index >= num_tokens){
         #ifdef JSMN_HELPER_LOG_ERRORS
-        printf("WARNING: jsmn_helper_get_object() failed, out of tokens\n");
+        internalwarningprintf("jsmn_helper_get_object() failed, out of tokens\n");
         #endif
         return false;
     }
 
     if(tokens[index].type != JSMN_OBJECT){
         #ifdef JSMN_HELPER_LOG_ERRORS
-        printf("WARNING: jsmn_helper_get_object() expected object, got something else\n");
+        internalwarningprintf("jsmn_helper_get_object() expected object, got something else\n");
         printf("   Got: ");
         jsmn_helper_print_token(buffer, tokens[index]);
         #endif
@@ -60,14 +61,14 @@ successful_t jsmn_helper_get_object(weak_cstr_t buffer, jsmntok_t *tokens, lengt
 successful_t jsmn_helper_get_array(weak_cstr_t buffer, jsmntok_t *tokens, length_t num_tokens, length_t index){
     if(index >= num_tokens){
         #ifdef JSMN_HELPER_LOG_ERRORS
-        printf("WARNING: jsmn_helper_get_array() failed, out of tokens\n");
+        internalwarningprintf("jsmn_helper_get_array() failed, out of tokens\n");
         #endif
         return false;
     }
 
     if(tokens[index].type != JSMN_OBJECT){
         #ifdef JSMN_HELPER_LOG_ERRORS
-        printf("WARNING: jsmn_helper_get_arry() expected array, got something else\n");
+        internalwarningprintf("jsmn_helper_get_array() expected array, got something else\n");
         printf("   Got: ");
         jsmn_helper_print_token(buffer, tokens[index]);
         #endif
@@ -80,14 +81,14 @@ successful_t jsmn_helper_get_array(weak_cstr_t buffer, jsmntok_t *tokens, length
 successful_t jsmn_helper_get_string(weak_cstr_t buffer, jsmntok_t *tokens, length_t num_tokens, length_t index, char *out_content, length_t max_output_size){
     if(index >= num_tokens){
         #ifdef JSMN_HELPER_LOG_ERRORS
-        printf("WARNING: jsmn_helper_get_string() failed, out of tokens\n");
+        internalwarningprintf("jsmn_helper_get_string() failed, out of tokens\n");
         #endif
         return false;
     }
 
     if(tokens[index].type != JSMN_STRING){
         #ifdef JSMN_HELPER_LOG_ERRORS
-        printf("WARNING: jsmn_helper_get_string() expected string, got something else\n");
+        internalwarningprintf("jsmn_helper_get_string() expected string, got something else\n");
         printf("   Got: ");
         jsmn_helper_print_token(buffer, tokens[index]);
         #endif
@@ -101,17 +102,41 @@ successful_t jsmn_helper_get_string(weak_cstr_t buffer, jsmntok_t *tokens, lengt
     return true;
 }
 
+successful_t jsmn_helper_get_vstring(weak_cstr_t buffer, jsmntok_t *tokens, length_t num_tokens, length_t index, strong_cstr_t *out_content){
+    if(index >= num_tokens){
+        #ifdef JSMN_HELPER_LOG_ERRORS
+        internalwarningprintf("jsmn_helper_get_string() failed, out of tokens\n");
+        #endif
+        return false;
+    }
+
+    if(tokens[index].type != JSMN_STRING){
+        #ifdef JSMN_HELPER_LOG_ERRORS
+        internalwarningprintf("jsmn_helper_get_string() expected string, got something else\n");
+        printf("   Got: ");
+        jsmn_helper_print_token(buffer, tokens[index]);
+        #endif
+        return false;
+    }
+
+    length_t length = tokens[index].end - tokens[index].start;
+    *out_content = malloc(length + 1);
+    memcpy(*out_content, buffer + tokens[index].start, length);
+    (*out_content)[length] = 0x00;
+    return true;
+}
+
 successful_t jsmn_helper_get_integer(weak_cstr_t buffer, jsmntok_t *tokens, length_t num_tokens, length_t index, long long *out_value){
     if(index >= num_tokens){
         #ifdef JSMN_HELPER_LOG_ERRORS
-        printf("WARNING: jsmn_helper_get_integer() failed, out of tokens\n");
+        internalwarningprintf("jsmn_helper_get_integer() failed, out of tokens\n");
         #endif
         return false;
     }
 
     if(tokens[index].type != JSMN_PRIMITIVE){
         #ifdef JSMN_HELPER_LOG_ERRORS
-        printf("WARNING: jsmn_helper_get_integer() expected primitive, got something else\n");
+        internalwarningprintf("jsmn_helper_get_integer() expected primitive, got something else\n");
         printf("   Got: ");
         jsmn_helper_print_token(buffer, tokens[index]);
         #endif
@@ -121,7 +146,7 @@ successful_t jsmn_helper_get_integer(weak_cstr_t buffer, jsmntok_t *tokens, leng
     char first_char = *(buffer + tokens[index].start);
     if(first_char != '-' && (first_char < '0' || first_char > '9')){
         #ifdef JSMN_HELPER_LOG_ERRORS
-        printf("WARNING: jsmn_helper_get_string() expected integer, got a different primitive\n");
+        internalwarningprintf("jsmn_helper_get_string() expected integer, got a different primitive\n");
         printf("   Got: ");
         jsmn_helper_print_token(buffer, tokens[index]);
         #endif
@@ -141,14 +166,14 @@ successful_t jsmn_helper_get_integer(weak_cstr_t buffer, jsmntok_t *tokens, leng
 successful_t jsmn_helper_get_boolean(weak_cstr_t buffer, jsmntok_t *tokens, length_t num_tokens, length_t index, bool *out_value){
     if(index >= num_tokens){
         #ifdef JSMN_HELPER_LOG_ERRORS
-        printf("WARNING: jsmn_helper_get_boolean() failed, out of tokens\n");
+        internalwarningprintf("jsmn_helper_get_boolean() failed, out of tokens\n");
         #endif
         return false;
     }
 
     if(tokens[index].type != JSMN_PRIMITIVE){
         #ifdef JSMN_HELPER_LOG_ERRORS
-        printf("WARNING: jsmn_helper_get_boolean() expected primitive, got something else\n");
+        internalwarningprintf("jsmn_helper_get_boolean() expected primitive, got something else\n");
         printf("   Got: ");
         jsmn_helper_print_token(buffer, tokens[index]);
         #endif
@@ -158,7 +183,7 @@ successful_t jsmn_helper_get_boolean(weak_cstr_t buffer, jsmntok_t *tokens, leng
     char first_char = *(buffer + tokens[index].start);
     if(first_char != 't' && first_char != 'f'){
         #ifdef JSMN_HELPER_LOG_ERRORS
-        printf("WARNING: jsmn_helper_get_boolean() expected boolean, got a different primitive\n");
+        internalwarningprintf("jsmn_helper_get_boolean() expected boolean, got a different primitive\n");
         printf("   Got: ");
         jsmn_helper_print_token(buffer, tokens[index]);
         #endif

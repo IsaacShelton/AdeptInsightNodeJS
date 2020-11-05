@@ -36,8 +36,9 @@ extern "C" {
 #define COMPILER_REPL             TRAIT_F
 #define COMPILER_WARN_AS_ERROR    TRAIT_G
 #define COMPILER_SHORT_WARNINGS   TRAIT_2_1
-#define COMPILER_COLON_COLON      TRAIT_2_2
-#define COMPILER_TYPE_COLON       TRAIT_2_3
+#define COMPILER_EMIT_OBJECT      TRAIT_2_2
+#define COMPILER_COLON_COLON      TRAIT_2_3
+#define COMPILER_TYPE_COLON       TRAIT_2_4
 
 // Possible compiler trait checks
 #define COMPILER_NULL_CHECKS      TRAIT_1
@@ -65,6 +66,7 @@ extern "C" {
 #define COMPILER_DEBUG_DUMP            TRAIT_2
 #define COMPILER_DEBUG_LLVMIR          TRAIT_3
 #define COMPILER_DEBUG_NO_VERIFICATION TRAIT_4
+#define COMPILER_DEBUG_NO_RESULT       TRAIT_5
 #endif // ENABLE_DEBUG_FEATURES
 
 // Possible compiler result flags (for internal use)
@@ -119,6 +121,13 @@ typedef struct compiler {
     unsigned int cross_compile_for;
     
     weak_cstr_t entry_point;
+    maybe_null_strong_cstr_t user_linker_options;
+    length_t user_linker_options_length;
+    length_t user_linker_options_capacity;
+
+    strong_cstr_t *user_search_paths;
+    length_t user_search_paths_length;
+    length_t user_search_paths_capacity;
 } compiler_t;
 
 #define CROSS_COMPILE_NONE    0x00
@@ -188,6 +197,14 @@ void show_version(compiler_t *compiler);
 // Gets the string identifier of the compiler
 strong_cstr_t compiler_get_string();
 
+// ---------------- compiler_add_user_linker_option ----------------
+// Adds user-supplied linker option
+void compiler_add_user_linker_option(compiler_t *compiler, weak_cstr_t option);
+
+// ---------------- compiler_add_user_search_path ----------------
+// Adds user-supplied search path
+void compiler_add_user_search_path(compiler_t *compiler, weak_cstr_t search_path, maybe_null_weak_cstr_t current_file);
+
 // ---------------- compiler_create_package ----------------
 // Creates and exports a package
 errorcode_t compiler_create_package(compiler_t *compiler, object_t *object);
@@ -220,14 +237,16 @@ void compiler_vwarnf(compiler_t *compiler, source_t source, const char *format, 
 #if !defined(ADEPT_INSIGHT_BUILD) || defined(__EMSCRIPTEN__)
 // ---------------- compiler_undeclared_function ----------------
 // Prints an error message for an undeclared function
+// NOTE: 'gives' can be NULL or 'gives.elements_length' can be zero
+//       to indicate to return matching
 void compiler_undeclared_function(compiler_t *compiler, object_t *object, source_t source,
-    const char *name, ast_type_t *types, length_t arity);
+    const char *name, ast_type_t *types, length_t arity, ast_type_t *gives);
 
-// ---------------- compiler_undeclared_function_possiblities ----------------
+// ---------------- compiler_undeclared_function_possibilities ----------------
 // Checks for all potential function candidates
 // If 'should_print', will print them
 // Returns whether any candidates exist
-bool compiler_undeclared_function_possiblities(object_t *object, tmpbuf_t *tmpbuf, const char *name, bool should_print);
+bool compiler_undeclared_function_possibilities(object_t *object, tmpbuf_t *tmpbuf, const char *name, bool should_print);
 
 // ---------------- compiler_undeclared_function_possible_name ----------------
 // Checks for a single possible name for the function
@@ -272,6 +291,11 @@ void compiler_create_warning(compiler_t *compiler, strong_cstr_t message, source
 // ---------------- adept_warnings_free_fully ----------------
 // Frees an array of warnings and the memory it occupies
 void adept_warnings_free_fully(adept_warning_t *warnings, length_t length);
+
+// ---------------- compiler_unnamespaced_name ----------------
+// Returns weak C-string to unnamespaced version of an identifier
+// e.g. "namespace\thing" => 'thing'
+weak_cstr_t compiler_unnamespaced_name(weak_cstr_t input);
 
 #ifdef __cplusplus
 }

@@ -89,6 +89,9 @@ extern "C" {
 #define EXPR_PHANTOM          0x00000040
 #define EXPR_TOGGLE           0x00000041
 #define EXPR_VA_ARG           0x00000042
+#define EXPR_INITLIST         0x00000043
+#define EXPR_POLYCOUNT        0x00000044
+#define EXPR_LLVM_ASM         0x00000045
 // Exclusive statements ---------------
 #define EXPR_DECLARE          0x00000050
 #define EXPR_DECLAREUNDEF     0x00000051
@@ -374,6 +377,20 @@ typedef struct {
     ast_expr_t **args;
     length_t arity;
     bool is_tentative;
+
+    // Optional return type matching, only
+    // exists if 'gives.elements_length' isn't zero
+    ast_type_t gives;
+
+    // Special flag to make this call
+    // fail if it's tentative and the target function
+    // isn't marked as implicit
+    // (used for internal implicit calls)
+    bool only_implicit;
+
+    // Special flag to make this call
+    // Not allow for implicit user casts
+    bool no_user_casts;
 } ast_expr_call_t;
 
 // ---------------- ast_expr_variable_t ----------------
@@ -461,6 +478,10 @@ typedef struct {
     ast_expr_t **args;
     length_t arity;
     bool is_tentative;
+
+    // Optional return type matching, only
+    // exists if 'gives.elements_length' isn't zero
+    ast_type_t gives;
 } ast_expr_call_method_t;
 
 // ---------------- ast_expr_va_arg_t ----------------
@@ -472,6 +493,36 @@ typedef struct {
     ast_type_t arg_type;
 } ast_expr_va_arg_t;
 
+// ---------------- ast_expr_initlist_t ----------------
+// Expression for initializer lists
+typedef struct {
+    unsigned int id;
+    source_t source;
+    ast_expr_t **elements;
+    length_t length;
+} ast_expr_initlist_t;
+
+// ---------------- ast_expr_polycount_t ----------------
+// Expression for polymorphic count variable
+// DANGEROUS: NOTE: 'sizeof(ast_expr_polycount_t) <= sizeof(ast_expr_usize_t)'
+typedef struct {
+    unsigned int id;
+    source_t source;
+    strong_cstr_t name;
+} ast_expr_polycount_t;
+
+typedef struct {
+    unsigned int id;
+    source_t source;
+    strong_cstr_t assembly;
+    weak_cstr_t constraints;
+    ast_expr_t **args;
+    length_t arity;
+    bool has_side_effects;
+    bool is_stack_align;
+    bool is_intel;
+} ast_expr_llvm_asm_t;
+
 // ---------------- ast_expr_declare_t ----------------
 // Expression for declaring a variable
 typedef struct {
@@ -482,6 +533,8 @@ typedef struct {
     ast_expr_t *value;
     bool is_pod;
     bool is_assign_pod;
+    bool is_static;
+    bool is_const;
 } ast_expr_declare_t;
 
 // ---------------- ast_expr_inline_declare_t ----------------
@@ -688,7 +741,28 @@ void ast_expr_create_null(ast_expr_t **out_expr, source_t source);
 
 // ---------------- ast_expr_create_call ----------------
 // Creates a call expression
-void ast_expr_create_call(ast_expr_t **out_expr, strong_cstr_t name, length_t arity, ast_expr_t **args, bool is_tentative, source_t source);
+// NOTE: 'gives' may be NULL or 'gives.elements_length' be zero
+//       to indicate no return matching
+void ast_expr_create_call(ast_expr_t **out_expr, strong_cstr_t name, length_t arity, ast_expr_t **args, bool is_tentative, ast_type_t *gives, source_t source);
+
+// ---------------- ast_expr_create_call_in_place ----------------
+// Creates a call expression without allocating memory on the heap
+// NOTE: 'gives' may be NULL or 'gives.elements_length' be zero
+//       to indicate no return matching
+void ast_expr_create_call_in_place(ast_expr_call_t *out_expr, strong_cstr_t name, length_t arity, ast_expr_t **args, bool is_tentative, ast_type_t *gives, source_t source);
+
+// ---------------- ast_expr_create_method_call ----------------
+// Creates a call method expression
+// NOTE: 'gives' may be NULL or 'gives.elements_length' be zero
+//       to indicate no return matching
+void ast_expr_create_call_method(ast_expr_t **out_expr, strong_cstr_t name, ast_expr_t *value, length_t arity, ast_expr_t **args, bool is_tentative, ast_type_t *gives, source_t source);
+
+// ---------------- ast_expr_create_call_method_in_place ----------------
+// Creates a call method expression without allocating memory on the heap
+// NOTE: 'gives' may be NULL or 'gives.elements_length' be zero
+//       to indicate no return matching
+void ast_expr_create_call_method_in_place(ast_expr_call_method_t *out_expr, strong_cstr_t name, ast_expr_t *value,
+        length_t arity, ast_expr_t **args, bool is_tentative, ast_type_t *gives, source_t source);
 
 // ---------------- ast_expr_create_variable ----------------
 // Creates a variable expression

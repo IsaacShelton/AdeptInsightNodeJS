@@ -63,11 +63,11 @@ void any_inject_ast_AnyTypeKind(ast_t *ast){
     /*
     enum AnyTypeKind (
         VOID, BOOL, BYTE, UBYTE, SHORT, USHORT, INT, UINT, LONG,
-        ULONG, FLOAT, DOUBLE, PTR, STRUCT, FUNC_PTR, FIXED_ARRAY
+        ULONG, FLOAT, DOUBLE, PTR, STRUCT, UNION, FUNC_PTR, FIXED_ARRAY
     )
     */
 
-    weak_cstr_t *kinds = malloc(sizeof(weak_cstr_t) * 16);
+    weak_cstr_t *kinds = malloc(sizeof(weak_cstr_t) * 17);
     kinds[0]  = "VOID";     kinds[1]  = "BOOL";
     kinds[2]  = "BYTE";     kinds[3]  = "UBYTE";
     kinds[4]  = "SHORT";    kinds[5]  = "USHORT";
@@ -75,9 +75,10 @@ void any_inject_ast_AnyTypeKind(ast_t *ast){
     kinds[8]  = "LONG";     kinds[9]  = "ULONG";
     kinds[10] = "FLOAT";    kinds[11] = "DOUBLE";
     kinds[12] = "PTR";      kinds[13] = "STRUCT";
-    kinds[14] = "FUNC_PTR"; kinds[15] = "FIXED_ARRAY";
+    kinds[14] = "UNION";    kinds[15] = "FUNC_PTR";
+    kinds[16] = "FIXED_ARRAY";
 
-    ast_add_enum(ast, strclone("AnyTypeKind"), kinds, 16, NULL_SOURCE);
+    ast_add_enum(ast, strclone("AnyTypeKind"), kinds, 17, NULL_SOURCE);
 }
 
 void any_inject_ast_AnyPtrType(ast_t *ast){

@@ -3,10 +3,10 @@ CC=emcc
 AR=emar
 SRCDIR=../src
 OBJDIR=../obj
-C_SOURCES=$(wildcard $(SRCDIR)/AST/*.c) $(wildcard $(SRCDIR)/BRIDGE/*.c) $(wildcard $(SRCDIR)/DRVR/*.c) $(wildcard $(SRCDIR)/LEX/*.c) $(wildcard $(SRCDIR)/PARSE/*.c) $(wildcard $(SRCDIR)/UTIL/*.c)
+C_SOURCES=$(wildcard $(SRCDIR)/AST/*.c) $(wildcard $(SRCDIR)/BRIDGE/*.c) $(wildcard $(SRCDIR)/DRVR/*.c) $(wildcard $(SRCDIR)/LEX/*.c) $(wildcard $(SRCDIR)/PARSE/*.c)  $(wildcard $(SRCDIR)/TOKEN/*.c) $(wildcard $(SRCDIR)/UTIL/*.c)
 C_OBJECTS=$(C_SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 INSIGHT=../../../obj/insight.a
-CFLAGS=-c -Wall -I"../include" -O3 -DADEPT_INSIGHT_BUILD # -fmax-errors=5 -Werror
+CFLAGS=-c -Wall -I"../include" -O3 -DADEPT_INSIGHT_BUILD -g # -fmax-errors=5 -Werror
 
 release: directories $(INSIGHT)
 
@@ -24,6 +24,7 @@ directories:
 	@if not exist $(OBJDIR)\DRVR mkdir $(OBJDIR)\DRVR
 	@if not exist $(OBJDIR)\LEX mkdir $(OBJDIR)\LEX
 	@if not exist $(OBJDIR)\PARSE mkdir $(OBJDIR)\PARSE
+	@if not exist $(OBJDIR)\TOKEN mkdir $(OBJDIR)\TOKEN
 	@if not exist $(OBJDIR)\UTIL mkdir $(OBJDIR)\UTIL
 else
 directories:
@@ -33,6 +34,7 @@ directories:
 	@mkdir -p $(OBJDIR)/DRVR
 	@mkdir -p $(OBJDIR)/LEX
 	@mkdir -p $(OBJDIR)/PARSE
+	@mkdir -p $(OBJDIR)/TOKEN
 	@mkdir -p $(OBJDIR)/UTIL
 endif
 
@@ -44,6 +46,7 @@ ifeq ($(OS), Windows_NT)
 	del $(OBJDIR)\DRVR\*.* /Q
 	del $(OBJDIR)\LEX\*.* /Q
 	del $(OBJDIR)\PARSE\*.* /Q
+	del $(OBJDIR)\TOKEN\*.* /Q
 	del $(OBJDIR)\UTIL\*.* /Q
 else
 	rm -f 2> /dev/null $(INSIGHT)
@@ -52,5 +55,6 @@ else
 	rm -f 2> /dev/null $(OBJDIR)/DRVR/*.*
 	rm -f 2> /dev/null $(OBJDIR)/LEX/*.*
 	rm -f 2> /dev/null $(OBJDIR)/PARSE/*.*
+	rm -f 2> /dev/null $(OBJDIR)/TOKEN/*.*
 	rm -f 2> /dev/null $(OBJDIR)/UTIL/*.*
 endif
