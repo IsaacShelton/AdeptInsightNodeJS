@@ -96,12 +96,10 @@ successful_t query_parse(weak_cstr_t json, query_t *out_query, strong_cstr_t *ou
                 *out_error = mallocandsprintf("Expected string value for '%s'", key);
                 goto cleanup_and_fail;
             }
-            printf("before: %s\n", escaped_code_string);
 
             strong_cstr_t unescaped_code_string = unescape_code_string(escaped_code_string);
             free(escaped_code_string);
             out_query->code = unescaped_code_string;
-            printf("after: %s\n", unescaped_code_string);
         } else {
             // "???" : "???"
             if(out_error) *out_error = mallocandsprintf("Unrecognized key '%s'", key);

@@ -25,12 +25,14 @@ function invokeInsight(query_json_string){
 }
 
 setTimeout(() => {
+    var filename = "/Users/isaac/AdeptProjects/Adept2DPlatformer/main.adept";
+
     var query = JSON.stringify(
         {
             "query": "validate",
             "infrastructure": "/Users/isaac/Projects/Adept/bin/",
-            "filename": "/Users/isaac/vsl.txt"
-            //"filename": "/Users/isaac/main.adept"
+            "filename": filename,
+            "code": require('fs').readFileSync(filename, "utf8")
         }
     );
     console.log(invokeInsight(query));
