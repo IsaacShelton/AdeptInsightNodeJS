@@ -25,7 +25,7 @@ function invokeInsight(query_json_string){
 }
 
 setTimeout(() => {
-    var filename = "/Users/isaac/AdeptProjects/Adept2DPlatformer/main.adept";
+    var filename = "/Users/isaac/AdeptProjects/GenericCardGame/main.adept";
 
     var query = JSON.stringify(
         {
