@@ -124,6 +124,11 @@ successful_t query_set_kind_by_name(query_t *out_query, weak_cstr_t kind_name){
         return true;
     }
 
+    if(strcmp(kind_name, "ast") == 0){
+        out_query->kind = QUERY_KIND_AST;
+        return true;
+    }
+
     return false;
 }
 

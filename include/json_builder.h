@@ -24,6 +24,7 @@ void json_builder_free(json_builder_t *builder);
 // Builds various parts of a JSON string
 void json_build_string(json_builder_t *builder, weak_cstr_t string);
 void json_build_integer(json_builder_t *builder, long long integer);
+void json_build_null(json_builder_t *builder);
 void json_build_next(json_builder_t *builder);
 
 void json_build_array_start(json_builder_t *builder);
@@ -38,6 +39,10 @@ void json_build_object_end(json_builder_t *builder);
 // ---------------- json_builder_append ----------------
 // Append raw string to JSON builder
 void json_builder_append(json_builder_t *builder, weak_cstr_t string);
+
+// ---------------- json_builder_append_escaped ----------------
+// Append raw string that will be escaped to JSON builder
+void json_builder_append_escaped(json_builder_t *builder, weak_cstr_t string);
 
 // ---------------- json_builder_finalize ----------------
 // Returns the constructed serialized JSON

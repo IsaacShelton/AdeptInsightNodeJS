@@ -26,6 +26,10 @@ void json_build_integer(json_builder_t *builder, long long integer){
     free(string);
 }
 
+void json_build_null(json_builder_t *builder){
+    json_builder_append(builder, "null");
+}
+
 void json_build_next(json_builder_t *builder){
     json_builder_append(builder, ",");
 }
@@ -67,6 +71,16 @@ void json_builder_append(json_builder_t *builder, weak_cstr_t string){
     expand((void**) &builder->buffer, sizeof(char), builder->length, &builder->capacity, string_length + 1, 2048);
     memcpy(&builder->buffer[builder->length], string, string_length + 1);
     builder->length += string_length;
+}
+
+void json_builder_append_escaped(json_builder_t *builder, weak_cstr_t string){
+    if(string_needs_escaping(string, 0x00)){
+        strong_cstr_t escaped = string_to_escaped_string(string, strlen(string), 0x00);
+        json_builder_append(builder, escaped);
+        free(escaped);
+    } else {
+        json_builder_append(builder, string);
+    }
 }
 
 strong_cstr_t json_builder_finalize(json_builder_t *builder){

@@ -10,7 +10,8 @@
 // Kind of query
 typedef enum {
     QUERY_KIND_UNRECOGNIZED,
-    QUERY_KIND_VALIDATE
+    QUERY_KIND_VALIDATE,
+    QUERY_KIND_AST
 } query_kind_t;
 
 // ---------------- query_t ----------------

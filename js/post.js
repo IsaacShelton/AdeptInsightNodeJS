@@ -29,11 +29,13 @@ setTimeout(() => {
 
     var query = JSON.stringify(
         {
-            "query": "validate",
+            "query": "ast",
             "infrastructure": "/Users/isaac/Projects/Adept/bin/",
             "filename": filename,
             "code": require('fs').readFileSync(filename, "utf8")
         }
     );
-    console.log(invokeInsight(query));
+
+    var result = invokeInsight(query);
+    console.log(result);
 }, 100);
