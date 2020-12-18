@@ -11,26 +11,26 @@
 
 ```
 {
-	"query": "validate",
-	"infrastructure": "/Users/isaac/Projects/Adept/bin/",
-	"filename": "/Users/isaac/main.adept",
-	"code": "import basics\n\nfunc main {\n    print(\"Isaac says: \\\"Hello World!\\\"\")\n}\n"
+    "query": "validate",
+    "infrastructure": "/Users/isaac/Projects/Adept/bin/",
+    "filename": "/Users/isaac/main.adept",
+    "code": "import basics\n\nfunc main {\n    print(\"Isaac says: \\\"Hello World!\\\"\")\n}\n"
 }
 ```
 #### ValidationResponse
 
 ```
 [
-	{
-		"kind", "warning",
-		"source": {"index": 0, "stride", 3},
-		"message": "Import a file???"
-	},
-	{
-		"kind", "error",
-		"source": {"index": 0, "stride", 10},
-		"message": "Failed to find file \"test.adept\""
-	}
+    {
+        "kind", "warning",
+        "source": {"index": 0, "stride", 3},
+        "message": "Import a file???"
+    },
+    {
+        "kind", "error",
+        "source": {"index": 0, "stride", 10},
+        "message": "Failed to find file \"test.adept\""
+    }
 ]
 ```
 
@@ -53,10 +53,10 @@ AST Query is supercedes Validation Query
 
 ```
 {
-	"query": "ast",
-	"infrastructure": "/Users/isaac/Projects/Adept/bin/",
-	"filename": "/Users/isaac/main.adept",
-	"code": "import basics\n\nfunc main {\n    print(\"Isaac says: \\\"Hello World!\\\"\")\n}\n"
+    "query": "ast",
+    "infrastructure": "/Users/isaac/Projects/Adept/bin/",
+    "filename": "/Users/isaac/main.adept",
+    "code": "import basics\n\nfunc main {\n    print(\"Isaac says: \\\"Hello World!\\\"\")\n}\n"
 }
 ```
 
@@ -65,28 +65,28 @@ AST Query is supercedes Validation Query
 ```
 {
     "validation": [
-			{
-				"kind", "warning",
-				"source": {"index": 0, "stride", 3},
-				"message": "Import a file???"
-			},
-			{
-				"kind", "error",
-				"source": {"index": 0, "stride", 10},
-				"message": "Failed to find file \"test.adept\""
-			}
-		],
-		"ast": {
-		    "functions": [
-		        {
-		            "name": "main",
-		            "definition": "func main() void",
-		            "arity": 0,
-		            "returns": "void",
-		            "source": {"index": 23, "stride", 4}
-		        }
-		    ]
-		}
+            {
+                "kind", "warning",
+                "source": {"index": 0, "stride", 3},
+                "message": "Import a file???"
+            },
+            {
+                "kind", "error",
+                "source": {"index": 0, "stride", 10},
+                "message": "Failed to find file \"test.adept\""
+            }
+        ],
+        "ast": {
+            "functions": [
+                {
+                    "name": "main",
+                    "definition": "func main() void",
+                    "arity": 0,
+                    "returns": "void",
+                    "source": {"index": 23, "stride", 4}
+                }
+            ]
+        }
 }
 ```
 
