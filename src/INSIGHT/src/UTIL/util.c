@@ -171,6 +171,7 @@ bool string_needs_escaping(weak_cstr_t string, char escaped_quote){
     return false;
 }
 
+
 length_t string_count_character(weak_cstr_t string, length_t length, char character){
     length_t count = 0;
     for(length_t i = 0; i != length; i++) if(string[i] == character) count++;
