@@ -17,7 +17,7 @@ errorcode_t parse_pragma(parse_ctx_t *ctx){
     token_t *tokens = ctx->tokenlist->tokens;
     maybe_null_weak_cstr_t read = NULL;
 
-    if(ctx->struct_association != NULL){
+    if(ctx->composite_association != NULL){
         compiler_panicf(ctx->compiler, ctx->tokenlist->sources[*ctx->i], "Cannot pass pragma directives within struct domain");
         return FAILURE;
     }
