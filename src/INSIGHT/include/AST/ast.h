@@ -14,7 +14,7 @@ extern "C" {
 
 #include "UTIL/trait.h"
 #include "UTIL/ground.h"
-#include "AST/ast_type.h"
+#include "AST/ast_type_lean.h"
 #include "AST/ast_expr.h"
 #include "AST/ast_layout.h"
 #include "AST/meta_directives.h"
@@ -304,6 +304,10 @@ maybe_index_t ast_find_enum(ast_enum_t *enums, length_t enums_length, const char
 // Finds a global variable by name
 // NOTE: Requires that 'globals' is sorted
 maybe_index_t ast_find_global(ast_global_t *globals, length_t globals_length, weak_cstr_t name);
+
+// ---------------- ast_add_alias ----------------
+// Adds a type alias to the global scope of an AST
+void ast_add_alias(ast_t *ast, strong_cstr_t name, ast_type_t strong_type, trait_t traits, source_t source);
 
 // ---------------- ast_add_enum ----------------
 // Adds an enum to the global scope of an AST

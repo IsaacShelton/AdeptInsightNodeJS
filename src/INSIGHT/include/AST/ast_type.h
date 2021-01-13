@@ -20,6 +20,7 @@ extern "C" {
 #include "UTIL/hash.h"
 #include "UTIL/trait.h"
 #include "UTIL/ground.h"
+#include "AST/ast_layout.h"
 
 // Possible AST type elements
 #define AST_ELEM_NONE             0x00
@@ -42,20 +43,8 @@ extern "C" {
 #define FLOW_OUT   0x02
 #define FLOW_INOUT 0x03
 
-// ---------------- ast_elem_t ----------------
-// General purpose struct for a type element
-typedef struct {
-    unsigned int id;
-    source_t source;
-} ast_elem_t;
-
-// ---------------- ast_type_t ----------------
-// Struct containing AST type information
-typedef struct {
-    ast_elem_t **elements;
-    length_t elements_length;
-    source_t source;
-} ast_type_t;
+// Acquire 'ast_elem_t' and 'ast_type_t' definitions from lean version of header
+#include "AST/ast_type_lean.h"
 
 // ---------------- ast_elem_base_t ----------------
 // Type element for base structure or primitive
@@ -139,6 +128,14 @@ typedef struct {
     length_t generics_length;
     bool name_is_polymorphic;
 } ast_elem_generic_base_t;
+
+// ---------------- ast_elem_layout_t ----------------
+// Type element for an anonymous composite
+typedef struct {
+    unsigned int id;
+    source_t source;
+    ast_layout_t layout;
+} ast_elem_layout_t;
 
 // ---------------- ast_unnamed_arg_t ----------------
 // Data structure for an unnamed argument
@@ -315,6 +312,13 @@ bool ast_type_has_polymorph(const ast_type_t *type);
 // NOTE: Assumes inout_type has ownership of AST type elements
 // NOTE: Frees memory allocated for the pointer element
 void ast_type_dereference(ast_type_t *inout_type);
+
+// ---------------- ast_type_unwrapped_view ----------------
+// Returns an AST type that references the internal data of another
+// with the first element removed.
+// NOTE: The returned type is only valid until the supplied 'type' is
+// modified, moved or destroyed
+ast_type_t ast_type_unwrapped_view(ast_type_t *type);
 
 // ---------------- ast_type_unwrap_fixed_array ----------------
 // Removes the first fixed-array element of a fixed-array type

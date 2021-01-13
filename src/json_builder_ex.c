@@ -1,4 +1,5 @@
 
+#include "AST/ast_type.h"
 #include "json_builder_ex.h"
 
 void json_build_source(json_builder_t *builder, compiler_t *compiler, source_t source){
