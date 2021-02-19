@@ -212,6 +212,7 @@ void ast_free_functions(ast_func_t *functions, length_t functions_length){
 void ast_free_function_aliases(ast_func_alias_t *faliases, length_t length){
     for(length_t i = 0; i != length; i++){
         ast_func_alias_t *falias = &faliases[i];
+        free(falias->from);
         ast_types_free_fully(falias->arg_types, falias->arity);
     }
 }
@@ -793,21 +794,21 @@ void ast_dump_globals(FILE *file, ast_global_t *globals, length_t globals_length
 
 void ast_dump_enums(FILE *file, ast_enum_t *enums, length_t enums_length){
     for(length_t i = 0; i != enums_length; i++){
-        ast_enum_t *inum = &enums[i];
+        ast_enum_t *enum_definition = &enums[i];
 
         char *kinds_string = NULL;
         length_t kinds_string_length = 0;
         length_t kinds_string_capacity = 0;
 
-        for(length_t i = 0; i != inum->length; i++){
-            const char *kind_name = inum->kinds[i];
+        for(length_t i = 0; i != enum_definition->length; i++){
+            const char *kind_name = enum_definition->kinds[i];
             length_t kind_name_length = strlen(kind_name);
             expand((void**) &kinds_string, sizeof(char), kinds_string_length, &kinds_string_capacity, kind_name_length + 2, 64);
 
             memcpy(&kinds_string[kinds_string_length], kind_name, kind_name_length);
             kinds_string_length += kind_name_length;
 
-            if(i + 1 == inum->length){
+            if(i + 1 == enum_definition->length){
                 kinds_string[kinds_string_length] = '\0';
             } else {
                 memcpy(&kinds_string[kinds_string_length], ", ", 2);
@@ -816,7 +817,7 @@ void ast_dump_enums(FILE *file, ast_enum_t *enums, length_t enums_length){
         }
 
 
-        fprintf(file, "%s (%s)\n", inum->name, kinds_string ? kinds_string : "");
+        fprintf(file, "%s (%s)\n", enum_definition->name, kinds_string ? kinds_string : "");
         free(kinds_string);
     }
 }
@@ -901,7 +902,7 @@ ast_composite_t *ast_composite_find_exact(ast_t *ast, const char *name){
     return NULL;
 }
 
-successful_t ast_composite_find_field(ast_composite_t *composite, const char *name, ast_layout_endpoint_t *out_endpoint, ast_layout_endpoint_path_t *out_path){
+successful_t ast_composite_find_exact_field(ast_composite_t *composite, const char *name, ast_layout_endpoint_t *out_endpoint, ast_layout_endpoint_path_t *out_path){
     if(!ast_field_map_find(&composite->layout.field_map, name, out_endpoint)) return false;
     if(!ast_layout_get_path(&composite->layout, *out_endpoint, out_path)) return false;
     return true;
