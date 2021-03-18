@@ -122,7 +122,7 @@ void json_build_composite_definition(json_builder_t *builder, ast_composite_t *c
             }
         }
     } else {
-        json_builder_append(builder, "<complex composite layout>\"");    
+        json_builder_append(builder, "<complex composite layout>");    
     }
 
     json_builder_append(builder, ")\"");

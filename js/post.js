@@ -20,7 +20,7 @@ function invokeInsight(query_json_string){
     _free(result_json_cstring);
 
     checkUnflushedContent();
-
+    
     return JSON.parse(result_json);
 }
 
@@ -35,6 +35,7 @@ setTimeout(() => {
             "code": require('fs').readFileSync(filename, "utf8")
         }
     );
+
 
     var result = invokeInsight(query);
     console.log(result);
