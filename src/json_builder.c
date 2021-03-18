@@ -83,6 +83,10 @@ void json_builder_append_escaped(json_builder_t *builder, weak_cstr_t string){
     }
 }
 
+void json_builder_remove(json_builder_t *builder, length_t amount){
+    builder->length -= amount;
+}
+
 strong_cstr_t json_builder_finalize(json_builder_t *builder){
     strong_cstr_t result = builder->buffer;
     json_builder_init(builder);

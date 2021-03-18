@@ -8,6 +8,30 @@
 #include "UTIL/filename.h"
 #include "UTIL/__insight_undo_overloads.h"
 
+static void add_function_definition(json_builder_t *builder, ast_func_t *func){
+    json_build_object_start(builder);
+    json_build_object_key(builder, "name");
+    json_build_string(builder, func->name);
+    json_build_object_next(builder);
+    json_build_object_key(builder, "definition");
+    json_build_func_definition(builder, func);
+    json_build_object_end(builder);
+
+    json_build_object_next(builder);
+}
+
+static void add_composite_definition(json_builder_t *builder, ast_composite_t *composite){
+    json_build_object_start(builder);
+    json_build_object_key(builder, "name");
+    json_build_string(builder, composite->name);
+    json_build_object_next(builder);
+    json_build_object_key(builder, "definition");
+    json_build_composite_definition(builder, composite);
+    json_build_object_end(builder);
+
+    json_build_object_next(builder);
+}
+
 void build_ast(json_builder_t *builder, compiler_t *compiler, object_t *object){
     ast_t *ast = &object->ast;
 
@@ -15,23 +39,32 @@ void build_ast(json_builder_t *builder, compiler_t *compiler, object_t *object){
 
     json_build_object_key(builder, "functions");
     json_build_array_start(builder);
-    for(length_t i = 0; i != ast->funcs_length; i++){
-        ast_func_t *func = &ast->funcs[i];
 
-        json_build_object_start(builder);
-        json_build_object_key(builder, "name");
-        json_build_string(builder, func->name);
-        json_build_object_next(builder);
-        json_build_object_key(builder, "definition");
-        json_build_func_definition(builder, func);
-        json_build_object_end(builder);
+    bool has_some_functions = ast->funcs_length || ast->polymorphic_funcs_length;
 
-        if(i + 1 != ast->funcs_length){
-            json_build_object_next(builder);
-        }
+    for(length_t i = 0; i < ast->funcs_length; i++){
+        add_function_definition(builder, &ast->funcs[i]);
     }
-    json_build_array_end(builder);
 
+    if(has_some_functions) json_builder_remove(builder, 1); // Remove trailing ','
+
+    json_build_array_end(builder);
+    json_build_object_next(builder);
+    json_build_object_key(builder, "composites");
+    json_build_array_start(builder);
+
+    bool has_some_composites = ast->composites_length || ast->polymorphic_composites_length;
+
+    for(length_t i = 0; i < ast->composites_length; i++){
+        add_composite_definition(builder, &ast->composites[i]);
+    }
+    for(length_t i = 0; i < ast->polymorphic_composites_length; i++){
+        add_composite_definition(builder, (ast_composite_t*) &ast->polymorphic_composites[i]);
+    }
+    
+    if(has_some_composites) json_builder_remove(builder, 1); // Remove trailing ','
+
+    json_build_array_end(builder);
     json_build_object_end(builder);
 }
 

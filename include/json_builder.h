@@ -44,6 +44,11 @@ void json_builder_append(json_builder_t *builder, weak_cstr_t string);
 // Append raw string that will be escaped to JSON builder
 void json_builder_append_escaped(json_builder_t *builder, weak_cstr_t string);
 
+// ---------------- json_builder_append_escaped ----------------
+// Removes the last 'amount' characters from the string being built.
+// NOTE: Assumes operation is valid and there are enough characters
+void json_builder_remove(json_builder_t *builder, length_t amount);
+
 // ---------------- json_builder_finalize ----------------
 // Returns the constructed serialized JSON
 strong_cstr_t json_builder_finalize(json_builder_t *builder);

@@ -65,3 +65,65 @@ void json_build_func_definition(json_builder_t *builder, ast_func_t *func){
     free(s);
     json_builder_append(builder, "\"");
 }
+
+void json_build_composite_definition(json_builder_t *builder, ast_composite_t *composite){
+    json_builder_append(builder, "\"");
+
+    if(ast_layout_is_simple_struct(&composite->layout)){
+        json_builder_append(builder, "struct ");
+    } else if(ast_layout_is_simple_struct(&composite->layout)){
+        json_builder_append(builder, "union ");
+    } else {
+        json_builder_append(builder, "struct ");
+    }
+
+    if(composite->is_polymorphic){
+        json_builder_append(builder, "<");
+        ast_polymorphic_composite_t *poly_composite = (ast_polymorphic_composite_t*) composite;
+
+        for(length_t i = 0; i < poly_composite->generics_length; i++){
+            json_builder_append(builder, "$");
+            json_builder_append_escaped(builder, poly_composite->generics[i]);
+            json_builder_append(builder, ", ");
+        }
+
+        if(poly_composite->generics_length) json_builder_remove(builder, 2); // Remove trailing ', '
+        
+        json_builder_append(builder, "> ");
+    }
+    
+
+    json_builder_append_escaped(builder, composite->name);    
+    json_builder_append(builder, " (");
+
+    if(ast_layout_is_simple_struct(&composite->layout) || ast_layout_is_simple_struct(&composite->layout)){
+        ast_layout_t *layout = &composite->layout;
+        ast_field_map_t *field_map = &layout->field_map;
+        
+        for(length_t i = 0; i != field_map->arrows_length; i++){
+            ast_field_arrow_t *arrow = &field_map->arrows[i];
+            
+            json_builder_append(builder, arrow->name);
+            json_builder_append(builder, " ");
+
+            ast_type_t *field_type = ast_layout_skeleton_get_type(&layout->skeleton, arrow->endpoint);
+
+            if(field_type == NULL){
+                json_builder_append(builder, "<unknown type>");
+                continue;
+            } else {
+                char *s = ast_type_str(field_type);
+                json_builder_append(builder, s);
+                free(s);
+            }
+            
+            if(i + 1 < field_map->arrows_length){
+                json_builder_append(builder, ", ");
+            }
+        }
+    } else {
+        json_builder_append(builder, "<complex composite layout>\"");    
+    }
+
+    json_builder_append(builder, ")\"");
+}

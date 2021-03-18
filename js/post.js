@@ -20,7 +20,7 @@ function invokeInsight(query_json_string){
     _free(result_json_cstring);
 
     checkUnflushedContent();
-    
+
     return JSON.parse(result_json);
 }
 
