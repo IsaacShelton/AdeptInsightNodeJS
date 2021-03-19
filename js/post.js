@@ -36,7 +36,6 @@ setTimeout(() => {
         }
     );
 
-
     var result = invokeInsight(query);
     console.log(result);
 }, 100);
