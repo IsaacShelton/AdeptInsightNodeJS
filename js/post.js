@@ -21,11 +21,13 @@ function invokeInsight(query_json_string){
 
     checkUnflushedContent();
     
+    console.log(result_json.substring(1230))
     return JSON.parse(result_json);
 }
 
 setTimeout(() => {
-    var filename = "/Users/isaac/AdeptProjects/GenericCardGame/main.adept";
+    //var filename = "/Users/isaac/AdeptProjects/GenericCardGame/main.adept";
+    var filename = "/Users/isaac/Projects/Adept/bugs/2021_mar_27-unresolved/main.adept";
 
     var query = JSON.stringify(
         {

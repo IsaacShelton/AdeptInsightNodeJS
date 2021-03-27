@@ -103,7 +103,7 @@ void json_build_composite_definition(json_builder_t *builder, ast_composite_t *c
         for(length_t i = 0; i != field_map->arrows_length; i++){
             ast_field_arrow_t *arrow = &field_map->arrows[i];
             
-            json_builder_append(builder, arrow->name);
+            json_builder_append_escaped(builder, arrow->name);
             json_builder_append(builder, " ");
 
             ast_type_t *field_type = ast_layout_skeleton_get_type(&layout->skeleton, arrow->endpoint);
@@ -113,7 +113,7 @@ void json_build_composite_definition(json_builder_t *builder, ast_composite_t *c
                 continue;
             } else {
                 char *s = ast_type_str(field_type);
-                json_builder_append(builder, s);
+                json_builder_append_escaped(builder, s);
                 free(s);
             }
             
