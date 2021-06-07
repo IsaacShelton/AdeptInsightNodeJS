@@ -27,7 +27,7 @@ function invokeInsight(query_json_string){
 
 setTimeout(() => {
     //var filename = "/Users/isaac/AdeptProjects/GenericCardGame/main.adept";
-    var filename = "/Users/isaac/Projects/Adept/bugs/2021_mar_27-unresolved/main.adept";
+    var filename = "/Users/isaac/AdeptProjects/Box2D/examples/graphical/main.adept";
 
     var query = JSON.stringify(
         {
@@ -39,5 +39,4 @@ setTimeout(() => {
     );
 
     var result = invokeInsight(query);
-    console.log(result);
 }, 100);
