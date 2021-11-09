@@ -53,9 +53,12 @@ void json_build_func_definition(json_builder_t *builder, ast_func_t *func){
             json_builder_append(builder, ", ...");
         } else if(func->traits & AST_FUNC_VARIADIC){
             json_builder_append(builder, ", ");
-            json_builder_append_escaped(builder, func->variadic_arg_name);
-            json_builder_append(builder, " ...");
         }
+    }
+
+    if(func->traits & AST_FUNC_VARIADIC){
+        json_builder_append_escaped(builder, func->variadic_arg_name);
+        json_builder_append(builder, " ...");
     }
 
     json_builder_append(builder, ") ");
