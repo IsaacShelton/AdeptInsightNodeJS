@@ -11,6 +11,7 @@ void query_init(query_t *query){
     query->infrastructure = NULL;
     query->filename = NULL;
     query->code = NULL;
+    query->warnings = true;
 }
 
 void query_free(query_t *query){
@@ -100,6 +101,16 @@ successful_t query_parse(weak_cstr_t json, query_t *out_query, strong_cstr_t *ou
             strong_cstr_t unescaped_code_string = unescape_code_string(escaped_code_string);
             free(escaped_code_string);
             out_query->code = unescaped_code_string;
+        } else if(strcmp(key, "warnings") == 0){
+            // "warnings" : ...
+
+            bool warnings;
+            if(!jsmn_helper_get_boolean(json, tokens, required_tokens, section_token_index, &warnings)){
+                *out_error = mallocandsprintf("Expected boolean value for '%s'", key);
+                goto cleanup_and_fail;
+            }
+
+            out_query->warnings = warnings;
         } else {
             // "???" : "???"
             if(out_error) *out_error = mallocandsprintf("Unrecognized key '%s'", key);

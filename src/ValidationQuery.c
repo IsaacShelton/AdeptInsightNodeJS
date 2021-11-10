@@ -37,6 +37,11 @@ void handle_validation_query(query_t *query, json_builder_t *builder){
     // Set compiler root
     compiler.root = strclone(query->infrastructure);
 
+    if (!query->warnings) {
+        compiler.traits |= COMPILER_NO_WARN;
+        compiler.ignore |= COMPILER_IGNORE_ALL;
+    }
+
     // NOTE: Passing ownership of 'code' to object instance!!!
     object->buffer = query->code;
     object->buffer_length = strlen(query->code);

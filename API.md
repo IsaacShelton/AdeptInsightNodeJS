@@ -57,6 +57,7 @@ AST Query is supercedes Validation Query
     "infrastructure": "/Users/isaac/Projects/Adept/bin/",
     "filename": "/Users/isaac/main.adept",
     "code": "import basics\n\nfunc main {\n    print(\"Isaac says: \\\"Hello World!\\\"\")\n}\n"
+    "warnings": true,
 }
 ```
 

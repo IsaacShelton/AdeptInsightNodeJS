@@ -21,13 +21,13 @@ function invokeInsight(query_json_string){
 
     checkUnflushedContent();
     
-    console.log(result_json.substring(1230))
     return JSON.parse(result_json);
 }
 
 setTimeout(() => {
     //var filename = "/Users/isaac/AdeptProjects/GenericCardGame/main.adept";
-    var filename = "/Users/isaac/AdeptProjects/Box2D/examples/graphical/main.adept";
+    //var filename = "/Users/isaac/AdeptProjects/Box2D/examples/graphical/main.adept";
+    var filename = "/Users/isaac/Projects/Adept/bin/import/2.5/terminal.adept";
 
     var query = JSON.stringify(
         {
@@ -39,4 +39,5 @@ setTimeout(() => {
     );
 
     var result = invokeInsight(query);
+    console.log(result.ast.functions.filter(x => x.definition.includes("place")));
 }, 100);

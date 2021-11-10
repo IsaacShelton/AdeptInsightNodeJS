@@ -8,13 +8,15 @@
 #include "UTIL/filename.h"
 #include "UTIL/__insight_undo_overloads.h"
 
-static void add_function_definition(json_builder_t *builder, ast_func_t *func){
+static void add_function_definition(json_builder_t *builder, compiler_t *compiler, ast_func_t *func){
     json_build_object_start(builder);
     json_build_object_key(builder, "name");
     json_build_string(builder, func->name);
     json_build_object_next(builder);
     json_build_object_key(builder, "definition");
     json_build_func_definition(builder, func);
+    json_build_object_next(builder);
+    json_build_source(builder, compiler, func->source);
     json_build_object_end(builder);
 
     json_build_object_next(builder);
@@ -63,7 +65,7 @@ void build_ast(json_builder_t *builder, compiler_t *compiler, object_t *object){
     bool has_some_functions = ast->funcs_length || ast->polymorphic_funcs_length;
 
     for(length_t i = 0; i < ast->funcs_length; i++){
-        add_function_definition(builder, &ast->funcs[i]);
+        add_function_definition(builder, compiler, &ast->funcs[i]);
     }
 
     if(has_some_functions) json_builder_remove(builder, 1); // Remove trailing ','
@@ -201,6 +203,11 @@ void handle_ast_query(query_t *query, json_builder_t *builder){
 
     // Set compiler root
     compiler.root = strclone(query->infrastructure);
+
+    if (!query->warnings) {
+        compiler.traits |= COMPILER_NO_WARN;
+        compiler.ignore |= COMPILER_IGNORE_ALL;
+    }
 
     // NOTE: Passing ownership of 'code' to object instance!!!
     object->buffer = query->code;

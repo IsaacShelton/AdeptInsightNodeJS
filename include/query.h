@@ -21,6 +21,7 @@ typedef struct {
     maybe_null_strong_cstr_t infrastructure;
     maybe_null_strong_cstr_t filename;
     maybe_null_strong_cstr_t code;
+    bool warnings;
 } query_t;
 
 // ---------------- query_t ----------------
