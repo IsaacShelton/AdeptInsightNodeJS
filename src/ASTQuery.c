@@ -16,7 +16,11 @@ static void add_function_definition(json_builder_t *builder, compiler_t *compile
     json_build_object_key(builder, "definition");
     json_build_func_definition(builder, func);
     json_build_object_next(builder);
+    json_build_object_key(builder, "source");
     json_build_source(builder, compiler, func->source);
+    json_build_object_next(builder);
+    json_build_object_key(builder, "end");
+    json_build_source(builder, compiler, func->end_source);
     json_build_object_end(builder);
 
     json_build_object_next(builder);
@@ -247,6 +251,7 @@ store_and_cleanup:
         json_build_string(builder, "warning");
         json_build_next(builder);
 
+        json_build_object_key(builder, "source");
         json_build_source(builder, &compiler, compiler.warnings[i].source);
         json_build_next(builder);
 
@@ -264,6 +269,7 @@ store_and_cleanup:
         json_build_string(builder, "error");
         json_build_next(builder);
 
+        json_build_object_key(builder, "source");
         json_build_source(builder, &compiler, compiler.error->source);
         json_build_next(builder);
 

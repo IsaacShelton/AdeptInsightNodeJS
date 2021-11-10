@@ -63,6 +63,7 @@ store_and_cleanup:
         json_build_string(builder, "warning");
         json_build_next(builder);
 
+        json_build_object_key(builder, "source");
         json_build_source(builder, &compiler, compiler.warnings[i].source);
         json_build_next(builder);
 
@@ -80,6 +81,7 @@ store_and_cleanup:
         json_build_string(builder, "error");
         json_build_next(builder);
 
+        json_build_object_key(builder, "source");
         json_build_source(builder, &compiler, compiler.error->source);
         json_build_next(builder);
 
