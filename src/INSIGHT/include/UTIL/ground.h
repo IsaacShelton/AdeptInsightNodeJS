@@ -12,12 +12,14 @@ extern "C" {
     ----------------------------------------------------------------------------
 */
 
-#define ADEPT_VERSION_STRING    "2.5"
-#define ADEPT_VERSION_NUMBER    2.5
+#define ADEPT_VERSION_STRING    "2.6"
+#define ADEPT_VERSION_NUMBER    2.6
 #define ADEPT_VERSION_MAJOR     2
-#define ADEPT_VERSION_MINOR     5
+#define ADEPT_VERSION_MINOR     6
 #define ADEPT_VERSION_RELEASE   0
 #define ADEPT_VERSION_QUALIFIER ""
+
+#define ADEPT_PACKAGE_MANAGER_SPEC_VERSION 1
 
 #include <stdio.h>
 #include <assert.h>
