@@ -442,12 +442,13 @@ void ast_dump_statements(FILE *file, ast_expr_t **statements, length_t length, l
                 bool is_undef = statements[s]->id == EXPR_DECLAREUNDEF;
                 ast_expr_declare_t *declare_stmt = (ast_expr_declare_t*) statements[s];
 
-                if(declare_stmt->is_const)  fprintf(file, "const ");
-                if(declare_stmt->is_static) fprintf(file, "static ");
+                if(declare_stmt->traits & AST_EXPR_DECLARATION_CONST)  fprintf(file, "const ");
+                if(declare_stmt->traits & AST_EXPR_DECLARATION_STATIC) fprintf(file, "static ");
 
                 char *variable_type_str = ast_type_str(&declare_stmt->type);
-                char *pod = declare_stmt->is_pod ? "POD " : "";
-                fprintf(file, (declare_stmt->value == NULL && !is_undef) ? "%s %s%s\n" : "%s %s%s = ", declare_stmt->name, pod, variable_type_str);
+                char *pod = declare_stmt->traits & AST_EXPR_DECLARATION_POD ? "POD " : "";
+                char *assign_pod = declare_stmt->traits & AST_EXPR_DECLARATION_ASSIGN_POD ? "POD " : "";
+                fprintf(file, (declare_stmt->value == NULL && !is_undef) ? "%s %s%s\n" : "%s %s%s = %s", declare_stmt->name, pod, assign_pod, variable_type_str);
                 free(variable_type_str);
 
                 if(is_undef){
@@ -715,17 +716,14 @@ void ast_dump_composite(FILE *file, ast_composite_t *composite, length_t additio
     // Dump generics "<$K, $V>" if the composite is polymorphic
     if(composite->is_polymorphic){
         ast_polymorphic_composite_t *poly_composite = (ast_polymorphic_composite_t*) composite;
-        bool printed_first_generic = false;
 
         fprintf(file, "<");
 
         for(length_t i = 0; i != poly_composite->generics_length; i++){
             fprintf(file, "$%s", poly_composite->generics[i]);
 
-            if(printed_first_generic){
+            if(i + 1 != poly_composite->generics_length){
                 fprintf(file, ", ");
-            } else {
-                printed_first_generic = true;
             }
         }
 

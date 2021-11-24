@@ -88,12 +88,17 @@ errorcode_t parse_composite_head(parse_ctx_t *ctx, bool is_union, strong_cstr_t 
     length_t *i = ctx->i;
     token_t *tokens = ctx->tokenlist->tokens;
 
+    *out_is_packed = false;
+    *out_is_record = false;
+
     if(is_union){
         if(parse_eat(ctx, TOKEN_UNION, "Expected 'union' keyword for union definition")) return FAILURE;
     } else {
-        *out_is_packed = (tokens[*i].id == TOKEN_PACKED);
-        if(*out_is_packed) *i += 1;
-
+        if(tokens[*i].id == TOKEN_PACKED){
+            *out_is_packed = true;
+            *i += 1;
+        }
+        
         if(tokens[*i].id == TOKEN_RECORD){
             *out_is_record = true;
             *i += 1;
@@ -462,7 +467,9 @@ errorcode_t parse_create_record_constructor(parse_ctx_t *ctx, weak_cstr_t name, 
     func->statements_capacity = func->arity + 2;
     func->statements_length = func->statements_capacity;
     func->statements = malloc(sizeof(ast_expr_t*) * func->statements_capacity);
-    ast_expr_create_declaration(&func->statements[0], all_primitive ? EXPR_DECLAREUNDEF : EXPR_DECLARE, source, master_variable_name, ast_type_clone(&func->return_type), true, true, false, false, NULL);
+
+    trait_t traits = AST_EXPR_DECLARATION_POD | AST_EXPR_DECLARATION_ASSIGN_POD;
+    ast_expr_create_declaration(&func->statements[0], all_primitive ? EXPR_DECLAREUNDEF : EXPR_DECLARE, source, master_variable_name, ast_type_clone(&func->return_type), traits, NULL);
 
     for(length_t i = 0; i != func->arity; i++){
         weak_cstr_t field_name = field_map->arrows[i].name;
