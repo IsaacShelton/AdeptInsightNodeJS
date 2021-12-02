@@ -500,6 +500,8 @@ errorcode_t parse_arguments(compiler_t *compiler, object_t *object, int argc, ch
             } else if(strncmp(argv[arg_index], "--std=", 6) == 0){
                 compiler->default_stdlib = &argv[arg_index][6];
                 compiler->traits |= COMPILER_FORCE_STDLIB;
+            } else if(strcmp(argv[arg_index], "--windowed") == 0 || strcmp(argv[arg_index], "-mwindows") == 0){
+                compiler->traits |= COMPILER_WINDOWED;
             } else if(strcmp(argv[arg_index], "--entry") == 0){
                 if(arg_index + 1 == argc){
                     redprintf("Expected entry point after '--entry' flag\n");
@@ -722,6 +724,7 @@ void show_help(bool show_advanced_options){
     }
     
     printf("    -O0,-O1,-O2,-O3   Set optimization level\n");
+    printf("    --windowed        Don't open console with executable (only applies to Windows)\n");
     printf("    -std=2.x          Set standard library version\n");
     
     if(show_advanced_options)
@@ -904,6 +907,12 @@ strong_cstr_t compiler_get_stdlib(compiler_t *compiler, object_t *optional_objec
 void compiler_print_source(compiler_t *compiler, int line, source_t source){
     object_t *relevant_object = compiler->objects[source.object_index];
     if(relevant_object->buffer == NULL || relevant_object->traits & OBJECT_PACKAGE) return;
+
+    if(SOURCE_IS_NULL(source)){
+        printf("  N/A| (no source code)\n");
+        printf("\n");
+        return;
+    }
 
     length_t line_index = 0;
     for(int current_line = 1; current_line != line; line_index++){
@@ -1310,13 +1319,9 @@ void compiler_undeclared_method(compiler_t *compiler, object_t *object, source_t
             ast_elem_generic_base_t *first_arg_generic_base = (ast_elem_generic_base_t*) first_arg_type->elements[1];
 
             // Ensure the generics of the generic base match up
-            bool generics_match_up = maybe_generic_base->generics_length == first_arg_generic_base->generics_length;
-            if(generics_match_up) for(length_t i = 0; i != maybe_generic_base->generics_length; i++){
-                if(!(ast_types_identical(&maybe_generic_base->generics[i], &first_arg_generic_base->generics[i]) || ast_type_has_polymorph(&first_arg_generic_base->generics[i]))){
-                    generics_match_up = false;
-                    break;
-                }
-            }
+            bool generics_match_up = maybe_generic_base->generics_length == first_arg_generic_base->generics_length
+                                  && ast_type_lists_identical(maybe_generic_base->generics, first_arg_generic_base->generics, first_arg_generic_base->generics_length)
+                                  && !ast_type_list_has_polymorph(first_arg_generic_base->generics, first_arg_generic_base->generics_length);
 
             if(!generics_match_up) continue;
         }

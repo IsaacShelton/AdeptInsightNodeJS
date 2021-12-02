@@ -255,6 +255,30 @@ void ast_type_make_base_ptr_ptr(ast_type_t *type, strong_cstr_t base){
     type->source = NULL_SOURCE;
 }
 
+void ast_type_make_base_with_generics(ast_type_t *type, strong_cstr_t base, strong_cstr_t *generics, length_t generics_length){
+    ast_type_t *type_generics = malloc(sizeof(ast_type_t) * generics_length);
+
+    for(length_t i = 0; i < generics_length; i++){
+        ast_type_make_polymorph(&type_generics[i], generics[i], false);
+    }
+
+    // Free list, but not the strings inside (we have taken ownernship of them)
+    free(generics);
+
+    ast_elem_generic_base_t *elem = malloc(sizeof(ast_elem_generic_base_t));
+    elem->id = AST_ELEM_GENERIC_BASE;
+    elem->name = base;
+    elem->source = NULL_SOURCE;
+    elem->name_is_polymorphic = false;
+    elem->generics = type_generics;
+    elem->generics_length = generics_length;
+
+    type->elements = malloc(sizeof(ast_elem_t*));
+    type->elements[0] = (ast_elem_t*) elem;
+    type->elements_length = 1;
+    type->source = NULL_SOURCE;
+}
+
 void ast_type_prepend_ptr(ast_type_t *type){
     // Prepends a '*' to an existing ast_type_t
 
@@ -419,6 +443,7 @@ strong_cstr_t ast_type_str(const ast_type_t *type){
                 const char *polyname = ((ast_elem_polycount_t*) type->elements[i])->name;
                 string_builder_append_view(&builder, "$#", 2);
                 string_builder_append(&builder, polyname);
+                string_builder_append_view(&builder, " ", 1);
             }
             break;
         case AST_ELEM_GENERIC_BASE: {
@@ -568,6 +593,13 @@ bool ast_types_identical(const ast_type_t *a, const ast_type_t *b){
         }
     }
 
+    return true;
+}
+
+bool ast_type_lists_identical(const ast_type_t *a, const ast_type_t *b, length_t length){
+    for(length_t i = 0; i != length; i++){
+        if(!ast_types_identical(&a[i], &b[i])) return false;
+    }
     return true;
 }
 
@@ -730,6 +762,13 @@ bool ast_type_has_polymorph(const ast_type_t *type){
         default:
             internalerrorprintf("ast_type_has_polymorph() encountered unknown element id 0x%08X\n", type->elements[i]->id);
         }
+    }
+    return false;
+}
+
+bool ast_type_list_has_polymorph(const ast_type_t *types, length_t length){
+    for(length_t i = 0; i != length; i++){
+        if(ast_type_has_polymorph(&types[i])) return true;
     }
     return false;
 }
