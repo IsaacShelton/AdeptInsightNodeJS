@@ -19,7 +19,7 @@ only-run:
 run: develop only-run
 
 insight:
-	$(MAKE) -C src/INSIGHT/emscripten
+	$(MAKE) -C src/INSIGHT/
 
 clean:
 ifeq ($(OS), Windows_NT)
@@ -27,7 +27,7 @@ ifeq ($(OS), Windows_NT)
 else
 	rm -f 2> /dev/null obj/*.*
 endif
-	$(MAKE) -C src/INSIGHT/emscripten clean
+	$(MAKE) -C src/INSIGHT/ clean
 
 deepclean: clean
 

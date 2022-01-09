@@ -1,11 +1,20 @@
 
 #include <math.h>
-#include "LEX/lex.h"
-#include "UTIL/util.h"
-#include "UTIL/color.h"
-#include "UTIL/search.h"
-#include "DRVR/compiler.h"
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "AST/meta_directives.h"
+#include "DRVR/compiler.h"
+#include "DRVR/object.h"
+#include "LEX/lex.h"
+#include "UTIL/color.h"
+#include "UTIL/ground.h"
+#include "UTIL/search.h"
+#include "UTIL/string.h"
+#include "UTIL/util.h"
+#include "UTIL/datatypes.h"
 
 strong_cstr_t meta_expr_str(meta_expr_t *meta){
     switch(meta->id){
@@ -19,20 +28,12 @@ strong_cstr_t meta_expr_str(meta_expr_t *meta){
         return strclone("false");
     case META_EXPR_STR:
         return strclone(((meta_expr_str_t*) meta)->value);
-    case META_EXPR_INT: {
-            strong_cstr_t representation = malloc(21);
-            sprintf(representation, "%ld", (long) ((meta_expr_int_t*) meta)->value);
-            return representation;
-        }
-    case META_EXPR_FLOAT: {
-            strong_cstr_t representation = malloc(21);
-            sprintf(representation, "%06.6f", ((meta_expr_float_t*) meta)->value);
-            return representation;
-        }
+    case META_EXPR_INT:
+        return int64_to_string(((meta_expr_int_t*) meta)->value, "");
+    case META_EXPR_FLOAT:
+        return float64_to_string(((meta_expr_float_t*) meta)->value, "");
     default:
-        internalerrorprintf("Tried to get string from non-collapsed meta expression!\n");
-        redprintf("A crash will probably follow...\n");
-        return NULL;
+        panic("meta_expr_str() - Cannot get string value for non-collapsed meta expression\n");
     }
 }
 
@@ -79,7 +80,7 @@ void meta_expr_free(meta_expr_t *expr){
         meta_expr_free_fully(((meta_expr_not_t*) expr)->value);
         break;
     default:
-        internalerrorprintf("meta_expr_free encountered unknown meta expression id %d\n", (int) expr->id);
+        panic("meta_expr_free() - Unrecognized meta expression ID %d\n", (int) expr->id);
     }
 }
 
@@ -114,9 +115,7 @@ meta_expr_t *meta_expr_clone(meta_expr_t *expr){
             return (meta_expr_t*) result;
         }
     default:
-        internalerrorprintf("Tried to clone a non-collapsed meta expression!\n");
-        redprintf("A crash will probably follow...\n");
-        return NULL;
+        panic("meta_expr_clone() - Cannot clone a non-collapsed meta expression\n");
     }
 }
 
@@ -364,7 +363,7 @@ errorcode_t meta_collapse(compiler_t *compiler, object_t *object, meta_definitio
                 }
 
                 char mode = comparison_modes[(int) a_mode][(int) b_mode];
-                meta_expr_int_t *result = malloc(sizeof(meta_expr_t));
+                meta_expr_int_t *result = malloc(sizeof *result);
 
                 switch(mode){
                 case META_EXPR_MATH_MODE_INT: {
@@ -452,8 +451,7 @@ errorcode_t meta_collapse(compiler_t *compiler, object_t *object, meta_definitio
             }
             break;
         default:
-            internalerrorprintf("Unrecognized meta expression in meta_collapse!\n");
-            return FAILURE;
+            panic("meta_collapse() - Unrecognized meta expression ID %d\n", (int) (*expr)->id);
         }
     }
 
@@ -569,17 +567,11 @@ errorcode_t meta_expr_into_string(compiler_t *compiler, object_t *object, meta_d
     case META_EXPR_FALSE:
         *out = strclone("false");
         break;
-    case META_EXPR_INT: {
-            strong_cstr_t representation = malloc(21);
-            sprintf(representation, "%ld", (long) ((meta_expr_int_t*) *expr)->value);
-            *out = representation;
-        }
+    case META_EXPR_INT:
+        *out = int64_to_string(((meta_expr_int_t*) *expr)->value, "");
         break;
-    case META_EXPR_FLOAT: {
-            strong_cstr_t representation = malloc(21);
-            sprintf(representation, "%06.6f", ((meta_expr_float_t*) *expr)->value);
-            *out = representation;
-        }
+    case META_EXPR_FLOAT:
+        *out = float64_to_string(((meta_expr_float_t*) *expr)->value, "");
         break;
     case META_EXPR_STR:
         *out = strclone(((meta_expr_str_t*) *expr)->value);
@@ -626,7 +618,7 @@ void meta_definition_add_int(meta_definition_t **definitions, length_t *length, 
 
 meta_definition_t *meta_definition_find(meta_definition_t *definitions, length_t length, weak_cstr_t name){
     for(length_t i = 0; i != length; i++){
-        if(strcmp(definitions[i].name, name) == 0) return &definitions[i];
+        if(streq(definitions[i].name, name)) return &definitions[i];
     }
     return NULL;
 }
@@ -697,8 +689,7 @@ meta_expr_t *meta_get_special_variable(compiler_t *compiler, object_t *object, w
         result->id = compiler->traits & COMPILER_NO_TYPEINFO ? META_EXPR_FALSE : META_EXPR_TRUE;
         break;
     default:
-        internalerrorprintf("meta_get_special_variable() got unimplemented index\n");
-        return NULL;
+        panic("meta_get_special_variable() - Unimplemented index\n");
     }
     
     return result;

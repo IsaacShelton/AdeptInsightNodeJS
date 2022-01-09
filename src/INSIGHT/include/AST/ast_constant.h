@@ -13,24 +13,17 @@ extern "C" {
 #endif
 
 #include "UTIL/ground.h"
-#include "AST/ast_expr.h"
+#include "UTIL/trait.h"
+#include "AST/ast_expr_lean.h"
 
 // ---------------- ast_constant_t ----------------
 // A named constant expression
-typedef struct ast_constant {
+typedef struct {
     strong_cstr_t name;
     ast_expr_t *expression;
     trait_t traits;
     source_t source;
 } ast_constant_t;
-
-// ---------------- ast_expr_declare_constant_t ----------------
-// Expression for declaring a constant expression
-typedef struct {
-    unsigned int id;
-    source_t source;
-    struct ast_constant constant;
-} ast_expr_declare_constant_t;
 
 // ---------------- ast_constant_clone ----------------
 // Creates a clone of a named AST constant

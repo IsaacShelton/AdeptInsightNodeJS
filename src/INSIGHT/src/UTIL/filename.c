@@ -15,11 +15,15 @@
 #include <linux/limits.h>
 #endif
 
-#include "UTIL/util.h"
-#include "UTIL/color.h"
-#include "UTIL/ground.h"
-#include "UTIL/filename.h"
+#include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
+
 #include "DRVR/compiler.h"
+#include "UTIL/color.h"
+#include "UTIL/filename.h"
+#include "UTIL/ground.h"
+#include "UTIL/string.h"
 
 strong_cstr_t filename_name(const char *filename){
     length_t i;
@@ -201,9 +205,7 @@ strong_cstr_t filename_absolute(const char *filename){
     char *buffer = realpath(filename, NULL);
 
     if(buffer == NULL){
-        // Failed to get path
-        internalerrorprintf("filename_absolute() failed to get absolute path for '%s'\n", filename);
-        exit(1);
+        panic("filename_absolute() - Could not determine absolute path for '%s'\n", filename);
     }
 
     #ifdef TRACK_MEMORY_USAGE

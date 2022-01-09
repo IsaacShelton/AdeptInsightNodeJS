@@ -1,7 +1,16 @@
 
-#include "UTIL/util.h"
-#include "UTIL/color.h"
+#include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "DRVR/compiler.h"
+#include "DRVR/object.h"
+#include "LEX/token.h"
 #include "PARSE/parse_ctx.h"
+#include "TOKEN/token_data.h"
+#include "UTIL/ground.h"
+#include "UTIL/trait.h"
+#include "UTIL/util.h"
 
 void parse_ctx_init(parse_ctx_t *ctx, compiler_t *compiler, object_t *object){
     ctx->compiler = compiler;
@@ -72,15 +81,14 @@ errorcode_t parse_eat(parse_ctx_t *ctx, tokenid_t id, const char *error){
     // NOTE: We don't need to check whether *ctx->i == ctx->tokenlist->length because
     // every token list is terminated with a newline and this should never
     // be called from a newline token
-    
-    length_t i = (*ctx->i)++;
 
-    if(ctx->tokenlist->tokens[i].id != id){
+    if(parse_ctx_peek(ctx) != id){
         // ERROR: That token isn't what it's expected to be
-        if(error) compiler_panic(ctx->compiler, ctx->tokenlist->sources[i], error);
+        if(error) compiler_panic(ctx->compiler, parse_ctx_peek_source(ctx), error);
         return FAILURE;
     }
 
+    *ctx->i += 1;
     return SUCCESS;
 }
 
@@ -89,11 +97,9 @@ maybe_null_weak_cstr_t parse_eat_word(parse_ctx_t *ctx, const char *error){
     // every token list is terminated with a newline and this should never
     // be called from a newline token
 
-    length_t i = *ctx->i;
-
-    if(ctx->tokenlist->tokens[i].id != TOKEN_WORD){
+    if(parse_ctx_peek(ctx) != TOKEN_WORD){
         // ERROR: That token isn't a word
-        if(error) compiler_panic(ctx->compiler, ctx->tokenlist->sources[i], error);
+        if(error) compiler_panic(ctx->compiler, parse_ctx_peek_source(ctx), error);
         return NULL;
     }
 
@@ -105,7 +111,7 @@ maybe_null_weak_cstr_t parse_eat_string(parse_ctx_t *ctx, const char *error){
     // every token list is terminated with a newline and this should never
     // be called from a newline token
 
-    tokenid_t id = ctx->tokenlist->tokens[*ctx->i].id;
+    tokenid_t id = parse_ctx_peek(ctx);
 
     if(id == TOKEN_CSTRING)
         return (char*) ctx->tokenlist->tokens[(*ctx->i)++].data;
@@ -115,7 +121,7 @@ maybe_null_weak_cstr_t parse_eat_string(parse_ctx_t *ctx, const char *error){
         return ((token_string_data_t*) ctx->tokenlist->tokens[(*ctx->i)++].data)->array;
 
     // ERROR: That token isn't a string
-    if(error) compiler_panic(ctx->compiler, ctx->tokenlist->sources[*ctx->i], error);
+    if(error) compiler_panic(ctx->compiler, parse_ctx_peek_source(ctx), error);
     return NULL;
 }
 
@@ -128,16 +134,14 @@ maybe_null_strong_cstr_t parse_take_word(parse_ctx_t *ctx, const char *error){
     // every token list is terminated with a newline and this should never
     // be called from a newline token
 
-    length_t i = *ctx->i;
-
-    if(ctx->tokenlist->tokens[i].id != TOKEN_WORD){
+    if(parse_ctx_peek(ctx) != TOKEN_WORD){
         // ERROR: That token isn't a word
-        if(error) compiler_panic(ctx->compiler, ctx->tokenlist->sources[i], error);
+        if(error) compiler_panic(ctx->compiler, parse_ctx_peek_source(ctx), error);
         return NULL;
     }
 
-    strong_cstr_t ownership = (char*) ctx->tokenlist->tokens[i].data;
-    ctx->tokenlist->tokens[(*ctx->i)++].data = NULL;
+    strong_cstr_t ownership = (strong_cstr_t) parse_ctx_peek_data_take(ctx);
+    *ctx->i += 1;
     return ownership;
 }
 
@@ -146,16 +150,14 @@ maybe_null_strong_cstr_t parse_take_string(parse_ctx_t *ctx, const char *error){
     // every token list is terminated with a newline and this should never
     // be called from a newline token
 
-    length_t i = *ctx->i;
-    
-    if(ctx->tokenlist->tokens[i].id != TOKEN_STRING){
-        // ERROR: That token isn't a word
-        if(error) compiler_panic(ctx->compiler, ctx->tokenlist->sources[i], error);
+    if(parse_ctx_peek(ctx) != TOKEN_STRING){
+        // ERROR: That token isn't a string
+        if(error) compiler_panic(ctx->compiler, parse_ctx_peek_source(ctx), error);
         return NULL;
     }
 
-    strong_cstr_t ownership = (char*) ctx->tokenlist->tokens[i].data;
-    ctx->tokenlist->tokens[(*ctx->i)++].data = NULL;
+    strong_cstr_t ownership = (char*) parse_ctx_peek_data_take(ctx);
+    *ctx->i += 1;
     return ownership;
 }
 
@@ -167,16 +169,16 @@ maybe_null_weak_cstr_t parse_grab_word(parse_ctx_t *ctx, const char *error){
     // NOTE: We don't need to check whether *ctx->i == ctx->tokenlist->length because
     // every token list is terminated with a newline and this should never
     // be called from a newline token
+    
+    *ctx->i += 1;
 
-    tokenid_t id = ctx->tokenlist->tokens[++(*ctx->i)].id;
-
-    if(id != TOKEN_WORD){
+    if(parse_ctx_peek(ctx) != TOKEN_WORD){
         // ERROR: That token isn't a word
-        if(error) compiler_panic(ctx->compiler, ctx->tokenlist->sources[*ctx->i], error);
+        if(error) compiler_panic(ctx->compiler, parse_ctx_peek_source(ctx), error);
         return NULL;
     }
 
-    return (char*) ctx->tokenlist->tokens[(*ctx->i)].data;
+    return (char*) parse_ctx_peek_data(ctx);
 }
 
 maybe_null_weak_cstr_t parse_grab_string(parse_ctx_t *ctx, const char *error){
@@ -184,7 +186,9 @@ maybe_null_weak_cstr_t parse_grab_string(parse_ctx_t *ctx, const char *error){
     // every token list is terminated with a newline and this should never
     // be called from a newline token
 
-    tokenid_t id = ctx->tokenlist->tokens[++(*ctx->i)].id;
+    *ctx->i += 1;
+
+    tokenid_t id = parse_ctx_peek(ctx);
 
     if(id == TOKEN_CSTRING)
         return (char*) ctx->tokenlist->tokens[(*ctx->i)].data;
@@ -194,7 +198,7 @@ maybe_null_weak_cstr_t parse_grab_string(parse_ctx_t *ctx, const char *error){
         return ((token_string_data_t*) ctx->tokenlist->tokens[(*ctx->i)].data)->array;
 
     // ERROR: That token isn't a string
-    if(error) compiler_panic(ctx->compiler, ctx->tokenlist->sources[*ctx->i], error);
+    if(error) compiler_panic(ctx->compiler, parse_ctx_peek_source(ctx), error);
     return NULL;
 }
 
@@ -205,4 +209,23 @@ void parse_prepend_namespace(parse_ctx_t *ctx, strong_cstr_t *inout_name){
     strong_cstr_t new_name = mallocandsprintf("%s\\%s", ctx->object->current_namespace, *inout_name);
     free(*inout_name);
     *inout_name = new_name;
+}
+
+tokenid_t parse_ctx_peek(parse_ctx_t *ctx){
+    return ctx->tokenlist->tokens[*ctx->i].id;
+}
+
+source_t parse_ctx_peek_source(parse_ctx_t *ctx){
+    return ctx->tokenlist->sources[*ctx->i];
+}
+
+void *parse_ctx_peek_data(parse_ctx_t *ctx){
+    return ctx->tokenlist->tokens[*ctx->i].data;
+}
+
+void *parse_ctx_peek_data_take(parse_ctx_t *ctx){
+    token_t *token = &ctx->tokenlist->tokens[*ctx->i];
+    void *tmp = token->data;
+    token->data = NULL;
+    return tmp;
 }

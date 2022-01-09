@@ -1,5 +1,6 @@
 
 #include "UTIL/util.h"
+#include "UTIL/string.h"
 #include "UTIL/datatypes.h"
 #include "json_builder.h"
 #include "json_stringify.h"

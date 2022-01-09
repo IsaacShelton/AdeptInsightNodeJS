@@ -12,13 +12,19 @@ extern "C" {
     ---------------------------------------------------------------------------
 */
 
-#include "UTIL/trait.h"
-#include "UTIL/ground.h"
-#include "AST/ast_type_lean.h"
+#include <stdbool.h>
+#include <stdio.h>
+
+#include "AST/ast_constant.h"
 #include "AST/ast_expr.h"
 #include "AST/ast_layout.h"
+#include "AST/ast_type_lean.h"
 #include "AST/meta_directives.h"
 #include "BRIDGE/type_table.h"
+#include "UTIL/ground.h"
+#include "UTIL/trait.h"
+
+struct compiler;
 
 // ---------------- ast_func_t ----------------
 // A function within the root AST
@@ -35,9 +41,7 @@ typedef struct {
     trait_t traits;
     strong_cstr_t variadic_arg_name;
     source_t variadic_source;
-    ast_expr_t **statements;
-    length_t statements_length;
-    length_t statements_capacity;
+    ast_expr_list_t statements;
     source_t source;
     maybe_null_strong_cstr_t export_as;
 
@@ -72,9 +76,30 @@ typedef struct {
 #define AST_FUNC_AUTOGEN     TRAIT_9
 #define AST_FUNC_VARIADIC    TRAIT_A
 #define AST_FUNC_IMPLICIT    TRAIT_B
+#define AST_FUNC_WINMAIN     TRAIT_C
 
 // Additional AST function traits for builtin uses
 #define AST_FUNC_WARN_BAD_PRINTF_FORMAT TRAIT_2_1
+
+// ------------------ ast_func_prefixes_t ------------------
+// Information about the keywords that prefix a function
+typedef struct {
+    bool is_stdcall  : 1,
+         is_verbatim : 1,
+         is_implicit : 1,
+         is_external : 1;
+} ast_func_prefixes_t;
+
+// ------------------ ast_func_head_t ------------------
+// Information about the head of function declaration
+typedef struct {
+    strong_cstr_t name;
+    source_t source;
+    bool is_foreign : 1,
+         is_entry   : 1;
+    ast_func_prefixes_t prefixes;
+    maybe_null_strong_cstr_t export_name;
+} ast_func_head_t;
 
 // ---------------- ast_composite_t ----------------
 // A structure/union within the root AST
@@ -226,8 +251,6 @@ void ast_free(ast_t *ast);
 // Frees a specific part of the data within an AST
 void ast_free_functions(ast_func_t *functions, length_t functions_length);
 void ast_free_function_aliases(ast_func_alias_t *faliases, length_t length);
-void ast_free_statements(ast_expr_t **statements, length_t length);
-void ast_free_statements_fully(ast_expr_t **statements, length_t length);
 void ast_free_composites(ast_composite_t *composites, length_t composites_length);
 void ast_free_constants(ast_constant_t *constants, length_t constants_length);
 void ast_free_aliases(ast_alias_t *aliases, length_t aliases_length);
@@ -242,6 +265,7 @@ void ast_dump(ast_t *ast, const char *filename);
 // ---------------- ast_dump_* ----------------
 // Writes a specific part of an AST to a file
 void ast_dump_functions(FILE *file, ast_func_t *functions, length_t functions_length);
+void ast_dump_statement_list(FILE *file, ast_expr_list_t *statements, length_t indentation);
 void ast_dump_statements(FILE *file, ast_expr_t **statements, length_t length, length_t indentation);
 void ast_dump_composites(FILE *file, ast_composite_t *composites, length_t composites_length);
 void ast_dump_composite(FILE *file, ast_composite_t *composite, length_t additional_indentation);
@@ -256,8 +280,7 @@ strong_cstr_t ast_func_args_str(ast_func_t *func);
 
 // ---------------- ast_func_create_template ----------------
 // Fills out a blank template for a new function
-void ast_func_create_template(ast_func_t *func, strong_cstr_t name, bool is_stdcall, bool is_foreign, bool is_verbatim,
-        bool is_implicit, source_t source, bool is_entry, maybe_null_strong_cstr_t export_as);
+void ast_func_create_template(ast_func_t *func, const ast_func_head_t *options);
 
 // ---------------- ast_func_is_polymorphic ----------------
 // Returns whether an AST function has polymorphic arguments

@@ -1,10 +1,26 @@
 
-#include "UTIL/util.h"
-#include "UTIL/search.h"
-#include "UTIL/filename.h"
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "AST/ast.h"
+#include "AST/ast_expr.h"
+#include "AST/ast_type.h"
+#include "AST/meta_directives.h"
+#include "DRVR/compiler.h"
+#include "DRVR/object.h"
+#include "LEX/token.h"
+#include "PARSE/parse_ctx.h"
 #include "PARSE/parse_expr.h"
-#include "PARSE/parse_util.h"
 #include "PARSE/parse_type.h"
+#include "PARSE/parse_util.h"
+#include "TOKEN/token_data.h"
+#include "UTIL/datatypes.h"
+#include "UTIL/filename.h"
+#include "UTIL/ground.h"
+#include "UTIL/trait.h"
+#include "UTIL/util.h"
 
 errorcode_t parse_expr(parse_ctx_t *ctx, ast_expr_t **out_expr){
     // NOTE: Expects first token of expression to be pointed to by 'i'
@@ -154,7 +170,7 @@ errorcode_t parse_primary_expr(parse_ctx_t *ctx, ast_expr_t **out_expr){
     case TOKEN_META: {
             weak_cstr_t directive = tokens[(*i)++].data;
 
-            if(strcmp(directive, "get") != 0){
+            if(!streq(directive, "get")){
                 compiler_panicf(ctx->compiler, sources[*i - 1], "Unexpected meta directive '%s' in expression", directive);
                 return FAILURE;
             }
@@ -261,8 +277,7 @@ errorcode_t parse_primary_expr(parse_ctx_t *ctx, ast_expr_t **out_expr){
     case TOKEN_POLYCOUNT: {
             ast_expr_polycount_t *polycount_expr = malloc(sizeof(ast_expr_polycount_t));
             polycount_expr->id = EXPR_POLYCOUNT;
-            polycount_expr->name = tokens[*i].data;
-            tokens[*i].data = NULL;
+            polycount_expr->name = (char*) parse_ctx_peek_data_take(ctx);
             polycount_expr->source = sources[(*i)++];
             *out_expr = (ast_expr_t*) polycount_expr;
         }
@@ -344,10 +359,10 @@ errorcode_t parse_expr_post(parse_ctx_t *ctx, ast_expr_t **inout_expr){
                 if(tokens[*i + 1].id == TOKEN_OPEN){
                     // Method call expression
                     ast_expr_call_method_t *call_expr = malloc(sizeof(ast_expr_call_method_t));
-
+                    
                     // DANGEROUS: Partially initialize ast_expr_call_method_t
-                    ast_expr_create_call_method_in_place(call_expr, (char*) tokens[*i].data, *inout_expr, 0, NULL, is_tentative, false, NULL, sources[*i]);
-                    tokens[*i].data = NULL;
+                    strong_cstr_t method_name = (char*) parse_ctx_peek_data_take(ctx);
+                    ast_expr_create_call_method_in_place(call_expr, method_name, *inout_expr, 0, NULL, is_tentative, false, NULL, sources[*i]);
                     *i += 2;
 
                     // value.method(arg1, arg2, ...)
@@ -432,10 +447,13 @@ errorcode_t parse_expr_post(parse_ctx_t *ctx, ast_expr_t **inout_expr){
                         compiler_panic(ctx->compiler, sources[*i - 2], "Cannot have tentative field access");
                         return FAILURE;
                     }
+                    
+                    source_t source = sources[*i - 1];
+                    strong_cstr_t member_name = (char*) parse_ctx_peek_data_take(ctx);
 
                     // Member access expression
-                    ast_expr_create_member(inout_expr, *inout_expr, (char*) tokens[*i].data, sources[*i - 1]);
-                    tokens[(*i)++].data = NULL; // Take ownership
+                    ast_expr_create_member(inout_expr, *inout_expr, member_name, source);
+                    *i += 1;
                 }
             }
             break;
@@ -504,58 +522,52 @@ static tokenid_t parse_expr_has_terminating_token(tokenid_t id){
     // If the given token is an expression terminating token, it will be returned,
     // Otherwise TOKEN_NONE (value of 0) will be returned
 
-    // NOTE: DANGEROUS: Must be sorted, modify with caution
-    static const int terminators[] = {
-        TOKEN_WORD,               // 0x00000001
-        TOKEN_ASSIGN,             // 0x00000008
-        TOKEN_CLOSE,              // 0x00000011
-        TOKEN_BEGIN,              // 0x00000012
-        TOKEN_END,                // 0x00000013
-        TOKEN_NEWLINE,            // 0x00000014
-        TOKEN_NEXT,               // 0x00000022
-        TOKEN_BRACKET_CLOSE,      // 0x00000024
-        TOKEN_ADD_ASSIGN,         // 0x00000028
-        TOKEN_SUBTRACT_ASSIGN,    // 0x00000029
-        TOKEN_MULTIPLY_ASSIGN,    // 0x0000002A
-        TOKEN_DIVIDE_ASSIGN,      // 0x0000002B
-        TOKEN_MODULUS_ASSIGN,     // 0x0000002C
-        TOKEN_BIT_AND_ASSIGN,     // 0x0000002D
-        TOKEN_BIT_OR_ASSIGN,      // 0x0000002E
-        TOKEN_BIT_XOR_ASSIGN,     // 0x0000002F
-        TOKEN_BIT_LS_ASSIGN,      // 0x00000030
-        TOKEN_BIT_RS_ASSIGN,      // 0x00000031
-        TOKEN_BIT_LGC_LS_ASSIGN,  // 0x00000032 
-        TOKEN_BIT_LGC_RS_ASSIGN,  // 0x00000033
-        TOKEN_TERMINATE_JOIN,     // 0x00000037
-        TOKEN_COLON,              // 0x00000038
-
-        TOKEN_BREAK,              // 0x00000055
-        TOKEN_CONTINUE,           // 0x00000059
-        TOKEN_DEFER,              // 0x0000005C
-        TOKEN_DELETE,             // 0x0000005D
-        TOKEN_EACH,               // 0x0000005A
-        TOKEN_ELSE,               // 0x0000005E
-        TOKEN_EXHAUSTIVE,         // 0x00000061
-        TOKEN_FOR,                // 0x00000065
-        TOKEN_IF,                 // 0x0000006A
-        TOKEN_REPEAT,             // 0x00000077
-        TOKEN_RETURN,             // 0x00000078
-        TOKEN_SWITCH,             // 0x0000007D
-        TOKEN_UNLESS,             // 0x00000083
-        TOKEN_UNTIL,              // 0x00000084
-        TOKEN_USING,              // 0x00000085
-        TOKEN_VA_ARG,             // 0x00000086
-        TOKEN_VA_END,             // 0x00000087
-        TOKEN_VA_START,           // 0x00000089
-        TOKEN_WHILE,              // 0x0000008B
-    };
-
-    // Terminate operator expression portion if termination operator encountered
-    if(-1 == binary_int_search(terminators, sizeof(terminators) / sizeof(int), id)){
-        return TOKEN_NONE;
-    } else {
+    switch(id){
+    case TOKEN_WORD:
+    case TOKEN_ASSIGN:
+    case TOKEN_CLOSE:
+    case TOKEN_BEGIN:
+    case TOKEN_END:
+    case TOKEN_NEWLINE:
+    case TOKEN_NEXT:
+    case TOKEN_BRACKET_CLOSE:
+    case TOKEN_ADD_ASSIGN:
+    case TOKEN_SUBTRACT_ASSIGN:
+    case TOKEN_MULTIPLY_ASSIGN:
+    case TOKEN_DIVIDE_ASSIGN:
+    case TOKEN_MODULUS_ASSIGN:
+    case TOKEN_BIT_AND_ASSIGN:
+    case TOKEN_BIT_OR_ASSIGN:
+    case TOKEN_BIT_XOR_ASSIGN:
+    case TOKEN_BIT_LS_ASSIGN:
+    case TOKEN_BIT_RS_ASSIGN:
+    case TOKEN_BIT_LGC_LS_ASSIGN:
+    case TOKEN_BIT_LGC_RS_ASSIGN:
+    case TOKEN_TERMINATE_JOIN:
+    case TOKEN_COLON:
+    case TOKEN_BREAK:
+    case TOKEN_CONTINUE:
+    case TOKEN_DEFER:
+    case TOKEN_DELETE:
+    case TOKEN_EACH:
+    case TOKEN_ELSE:
+    case TOKEN_EXHAUSTIVE:
+    case TOKEN_FOR:
+    case TOKEN_IF:
+    case TOKEN_REPEAT:
+    case TOKEN_RETURN:
+    case TOKEN_SWITCH:
+    case TOKEN_UNLESS:
+    case TOKEN_UNTIL:
+    case TOKEN_USING:
+    case TOKEN_VA_ARG:
+    case TOKEN_VA_END:
+    case TOKEN_VA_START:
+    case TOKEN_WHILE:
         return id;
     }
+
+    return TOKEN_NONE;
 }
 
 static errorcode_t parse_expr_ternary(parse_ctx_t *ctx, ast_expr_t **inout_condition, source_t source){
@@ -569,38 +581,48 @@ static errorcode_t parse_expr_ternary(parse_ctx_t *ctx, ast_expr_t **inout_condi
     // Skip over '?'
     (*ctx->i)++;
 
-    // Allow newlines between '?' and when true expression
-    if(parse_ignore_newlines(ctx, "Unexpected end of expression")) return FAILURE;
-    
-    // Parse the "when true" expression
+    // "when true" expression
     ast_expr_t *expr_a;
-    if(parse_expr(ctx, &expr_a)) return FAILURE;
 
-    // Allow newlines between when true expression and ':'
-    if(parse_ignore_newlines(ctx, "Unexpected end of expression")) return FAILURE;
-
-    // Expect ':'
-    if(ctx->tokenlist->tokens[(*ctx->i)++].id != TOKEN_COLON){
-        compiler_panic(ctx->compiler, ctx->tokenlist->sources[*ctx->i - 1], "Ternary operator expected ':' after expression");
+    // Parse the "when true" expression
+    // (allowing newlines between '?' and when true expression)
+    if(parse_ignore_newlines(ctx, "Unexpected end of expression")
+    || parse_expr(ctx, &expr_a)){
         ast_expr_free_fully(*inout_condition);
-        ast_expr_free_fully(expr_a);
         return FAILURE;
     }
 
+    // Allow newlines between when true expression and ':'
+    if(parse_ignore_newlines(ctx, "Unexpected end of expression")){
+        goto failure;
+    }
+
+    // Expect ':'
+    if(parse_ctx_peek(ctx) != TOKEN_COLON){
+        compiler_panic(ctx->compiler, ctx->tokenlist->sources[*ctx->i], "Ternary operator expected ':' after expression");
+        goto failure;
+    }
+    *ctx->i += 1;
+
     // Allow newlines between ':' and when false expression
-    if(parse_ignore_newlines(ctx, "Unexpected end of expression")) return FAILURE;
+    if(parse_ignore_newlines(ctx, "Unexpected end of expression")){
+        goto failure;
+    }
 
     // Parse the "when false" expression
     ast_expr_t *expr_b;
     if(parse_expr(ctx, &expr_b)){
-        ast_expr_free_fully(*inout_condition);
-        ast_expr_free_fully(expr_a);
-        return FAILURE;
+        goto failure;
     }
 
     // Construct and yield ternary expression
     ast_expr_create_ternary(inout_condition, *inout_condition, expr_a, expr_b, source);
     return SUCCESS;
+
+failure:
+    ast_expr_free_fully(*inout_condition);
+    ast_expr_free_fully(expr_a);
+    return FAILURE;
 }
 
 errorcode_t parse_op_expr(parse_ctx_t *ctx, int precedence, ast_expr_t **inout_left, bool keep_mutable){
@@ -761,8 +783,7 @@ errorcode_t parse_expr_call(parse_ctx_t *ctx, ast_expr_t **out_expr, bool allow_
     source_t source = sources[*i];
 
     // Steal callee name
-    strong_cstr_t name = tokens[*i].data;
-    tokens[*i].data = NULL;
+    strong_cstr_t name = parse_ctx_peek_data_take(ctx);
 
     length_t arity = 0;
     ast_expr_t **args = NULL;
@@ -982,21 +1003,19 @@ errorcode_t parse_expr_cast(parse_ctx_t *ctx, ast_expr_t **out_expr){
     // cast <type> (value)
     //   ^
 
-    length_t *i = ctx->i;
-
     ast_type_t to;
     ast_expr_t *from;
 
     // Assume that expression starts with 'cast' keyword
-    source_t source = ctx->tokenlist->sources[(*i)++];
+    source_t source = parse_ctx_peek_source(ctx);
+    *ctx->i += 1;
 
     if(parse_type(ctx, &to)) return FAILURE;
     if(parse_ignore_newlines(ctx, "Unexpected statement termination")) return FAILURE;
-
-    if(ctx->tokenlist->tokens[*i].id == TOKEN_OPEN){
+    
+    if(parse_eat(ctx, TOKEN_OPEN, NULL) == SUCCESS){
         // 'cast' will only apply to expression in parentheses if present.
         // If this behavior is undesired, use the newer 'as' operator instead
-        (*i)++;
 
         // Ignore newlines before actual expression
         if(parse_ignore_newlines(ctx, "Unexpected statement termination")) return FAILURE;
@@ -1029,8 +1048,8 @@ errorcode_t parse_expr_as(parse_ctx_t *ctx, ast_expr_t **inout_expr){
     // (value) as <type>
     //         ^
 
-    // Assume that expression starts with 'as' keyword
-    source_t source = ctx->tokenlist->sources[(*ctx->i)++];
+    source_t source = parse_ctx_peek_source(ctx);
+    *ctx->i += 1;
 
     ast_type_t to;
     if(parse_type(ctx, &to)) return FAILURE;
@@ -1043,16 +1062,15 @@ errorcode_t parse_expr_at(parse_ctx_t *ctx, ast_expr_t **inout_expr){
     // (value) at <index>
     //         ^
 
+    source_t source = parse_ctx_peek_source(ctx);
+    *ctx->i += 1;
+
     ast_expr_t *index_expr;
+    if(parse_primary_expr(ctx, &index_expr)) return FAILURE;
+
     ast_expr_array_access_t *at_expr = malloc(sizeof(ast_expr_array_access_t));
-    at_expr->source = ctx->tokenlist->sources[(*ctx->i)++];
-
-    if(parse_primary_expr(ctx, &index_expr)){
-        free(at_expr);
-        return FAILURE;
-    }
-
     at_expr->id = EXPR_AT;
+    at_expr->source = source;
     at_expr->value = *inout_expr;
     at_expr->index = index_expr;
     *inout_expr = (ast_expr_t*) at_expr;
@@ -1060,33 +1078,30 @@ errorcode_t parse_expr_at(parse_ctx_t *ctx, ast_expr_t **inout_expr){
 }
 
 errorcode_t parse_expr_sizeof(parse_ctx_t *ctx, ast_expr_t **out_expr){
-    source_t source = ctx->tokenlist->sources[(*ctx->i)++];
+    source_t source = parse_ctx_peek_source(ctx);
+    *ctx->i += 1;
 
-    if(ctx->tokenlist->tokens[(*ctx->i)].id == TOKEN_OPEN){
+    if(parse_ctx_peek(ctx) == TOKEN_OPEN){
         // sizeof (value)
+
+        ast_expr_t *value;
+        if(parse_primary_expr(ctx, &value)) return FAILURE;
 
         ast_expr_sizeof_value_t *sizeof_value_expr = malloc(sizeof(ast_expr_sizeof_value_t));
         sizeof_value_expr->id = EXPR_SIZEOF_VALUE;
         sizeof_value_expr->source = source;
-
-        if(parse_primary_expr(ctx, &sizeof_value_expr->value)){
-            free(sizeof_value_expr);
-            return FAILURE;
-        }
-
+        sizeof_value_expr->value = value;
         *out_expr = (ast_expr_t*) sizeof_value_expr;
     } else {
         // sizeof Type
 
+        ast_type_t type;
+        if(parse_type(ctx, &type)) return FAILURE;
+
         ast_expr_sizeof_t *sizeof_expr = malloc(sizeof(ast_expr_sizeof_t));
         sizeof_expr->id = EXPR_SIZEOF;
         sizeof_expr->source = source;
-
-        if(parse_type(ctx, &sizeof_expr->type)){
-            free(sizeof_expr);
-            return FAILURE;
-        }
-
+        sizeof_expr->type = type;
         *out_expr = (ast_expr_t*) sizeof_expr;
     }
 
@@ -1096,29 +1111,31 @@ errorcode_t parse_expr_sizeof(parse_ctx_t *ctx, ast_expr_t **out_expr){
 errorcode_t parse_expr_alignof(parse_ctx_t *ctx, ast_expr_t **out_expr){
     // alignof Type
 
+    source_t source = parse_ctx_peek_source(ctx);
+    *ctx->i += 1;
+
+    ast_type_t type;
+    if(parse_type(ctx, &type)) return FAILURE;
+
     ast_expr_alignof_t *alignof_expr = malloc(sizeof(ast_expr_alignof_t));
     alignof_expr->id = EXPR_ALIGNOF;
-    alignof_expr->source = ctx->tokenlist->sources[(*ctx->i)++];
-
-    if(parse_type(ctx, &alignof_expr->type)){
-        free(alignof_expr);
-        return FAILURE;
-    }
-
+    alignof_expr->source = source;
+    alignof_expr->type = type;
     *out_expr = (ast_expr_t*) alignof_expr;
     return SUCCESS;
 }
 
 errorcode_t parse_expr_unary(parse_ctx_t *ctx, unsigned int expr_id, ast_expr_t **out_expr){
+    source_t source = parse_ctx_peek_source(ctx);
+    *ctx->i += 1;
+
+    ast_expr_t *value;
+    if(parse_primary_expr(ctx, &value)) return FAILURE;
+
     ast_expr_unary_t *unary_expr = malloc(sizeof(ast_expr_unary_t));
     unary_expr->id = expr_id;
-    unary_expr->source = ctx->tokenlist->sources[(*ctx->i)++];
-
-    if(parse_primary_expr(ctx, &unary_expr->value)){
-        free(unary_expr);
-        return FAILURE;
-    }
-
+    unary_expr->source = source;
+    unary_expr->value = value;
     *out_expr = (ast_expr_t*) unary_expr;
     return SUCCESS;
 }
@@ -1268,26 +1285,24 @@ errorcode_t parse_expr_def(parse_ctx_t *ctx, ast_expr_t **out_expr){
     ast_type_t type;
     if(parse_type(ctx, &type)) return FAILURE;
 
-    ast_expr_t *value;
-    if(tokens[*i].id == TOKEN_ASSIGN){
+    ast_expr_t *value = NULL;
+
+    if(parse_eat(ctx, TOKEN_ASSIGN, NULL) == SUCCESS){
         if(expr_id == EXPR_ILDECLAREUNDEF){
-            compiler_panic(ctx->compiler, sources[*i], "Can't initialize undefined inline variable");
+            compiler_panic(ctx->compiler, sources[*i - 1], "Can't initialize undefined inline variable");
             printf("\nDid you mean to use 'def' instead of 'undef'?\n");
             ast_type_free(&type);
             return FAILURE;
         }
 
-        if(tokens[++(*i)].id == TOKEN_POD){
+        if(parse_eat(ctx, TOKEN_POD, NULL) == SUCCESS){
             traits |= AST_EXPR_DECLARATION_ASSIGN_POD;
-            (*i)++;
         }
 
         if(parse_expr(ctx, &value)){
             ast_type_free(&type);
             return FAILURE;
         }
-    } else {
-        value = NULL;
     }
 
     ast_expr_create_declaration(out_expr, expr_id, source, name, type, traits, value);
@@ -1299,7 +1314,7 @@ errorcode_t parse_expr_typeinfo(parse_ctx_t *ctx, ast_expr_t **out_expr){
     typeinfo->id = EXPR_TYPEINFO;
     typeinfo->source = ctx->tokenlist->sources[(*ctx->i)++];
 
-    if(parse_type(ctx, &typeinfo->target)){
+    if(parse_type(ctx, &typeinfo->type)){
         free(typeinfo);
         return FAILURE;
     }

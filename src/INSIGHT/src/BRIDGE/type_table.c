@@ -1,8 +1,13 @@
 
-#include "UTIL/util.h"
-#include "UTIL/color.h"
+#include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "AST/ast_type.h"
 #include "BRIDGE/type_table.h"
+#include "UTIL/color.h"
+#include "UTIL/ground.h"
+#include "UTIL/string.h"
 
 void type_table_init(type_table_t *table){
     table->entries = NULL;
@@ -71,7 +76,7 @@ void type_table_give(type_table_t *table, ast_type_t *type, maybe_null_strong_cs
     // (with the current system)
     // Also, this may turn out to be beneficial for formulating types that
     // may not have been directly referred to at compile time
-    if(strcmp(weak_ast_type_entry.name, "void") != 0){
+    if(!streq(weak_ast_type_entry.name, "void")){
         ast_type_t with_additional_ptr = ast_type_clone(type);
         ast_type_prepend_ptr(&with_additional_ptr);
 
@@ -142,8 +147,8 @@ void type_table_give_base(type_table_t *table, weak_cstr_t base){
 
     // Since we cannot know whether or not '&' is ever used on the type,
     // force another type entry which is a pointer the the type
-    // (unless of course the type is void, cause *void is invalid)
-    if(strcmp(weak_ast_type_entry.name, "void") != 0){
+    // (unless of course the type is void, cause *void is an alias for 'ptr')
+    if(!streq(weak_ast_type_entry.name, "void")){
         // Add *T type table entry
         weak_ast_type_entry.ast_type.elements = &static_elements[0];
         weak_ast_type_entry.ast_type.elements_length = 2;

@@ -1,6 +1,12 @@
 
 #include "LEX/pkg.h"
+
+#include <stdlib.h>
+#include <string.h>
+
+#include "TOKEN/token_data.h"
 #include "UTIL/color.h"
+#include "UTIL/datatypes.h"
 #include "UTIL/search.h"
 
 errorcode_t pkg_write(const char *filename, tokenlist_t *tokenlist){
@@ -85,7 +91,7 @@ errorcode_t pkg_write(const char *filename, tokenlist_t *tokenlist){
 errorcode_t pkg_read(object_t *object){
     #if __EMSCRIPTEN__
     // Don't support .dep files when running via emscripten
-    redprintf("Adpet doesn't support '.dep' files when running via emscripten\n");
+    redprintf("Adept doesn't support '.dep' files when running via emscripten\n");
     return FAILURE;
     #endif
 

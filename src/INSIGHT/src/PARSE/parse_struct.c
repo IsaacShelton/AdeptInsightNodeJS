@@ -1,15 +1,31 @@
 
-#include "UTIL/util.h"
-#include "UTIL/search.h"
-#include "UTIL/builtin_type.h"
-#include "PARSE/parse.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "AST/ast.h"
+#include "AST/ast_expr.h"
+#include "AST/ast_layout.h"
+#include "AST/ast_type.h"
+#include "AST/TYPE/ast_type_make.h"
+#include "DRVR/compiler.h"
+#include "LEX/token.h"
+#include "PARSE/parse_ctx.h"
+#include "PARSE/parse_struct.h"
 #include "PARSE/parse_type.h"
 #include "PARSE/parse_util.h"
-#include "PARSE/parse_struct.h"
+#include "TOKEN/token_data.h"
+#include "UTIL/builtin_type.h"
+#include "UTIL/ground.h"
+#include "UTIL/search.h"
+#include "UTIL/string.h"
+#include "UTIL/trait.h"
+#include "UTIL/util.h"
 
 errorcode_t parse_composite(parse_ctx_t *ctx, bool is_union){
     ast_t *ast = ctx->ast;
-    source_t source = ctx->tokenlist->sources[*ctx->i];
+    source_t source = parse_ctx_peek_source(ctx);
 
     if(ctx->composite_association != NULL){
         compiler_panicf(ctx->compiler, source, "Cannot declare %s within another struct's domain", is_union ? "union" : "struct");
@@ -67,7 +83,7 @@ errorcode_t parse_composite(parse_ctx_t *ctx, bool is_union){
     }
 
     // Look for start of struct domain and set it up if it exists
-    if(parse_struct_is_function_like_beginning(ctx->tokenlist->tokens[*ctx->i].id)){
+    if(parse_struct_is_function_like_beginning(parse_ctx_peek(ctx))){
         ctx->composite_association = (ast_polymorphic_composite_t *)domain;
         *ctx->i -= 1;
     } else {
@@ -122,33 +138,33 @@ errorcode_t parse_composite_head(parse_ctx_t *ctx, bool is_union, strong_cstr_t 
             expand((void**) &generics, sizeof(strong_cstr_t), generics_length, &generics_capacity, 1, 4);
 
             if(parse_ignore_newlines(ctx, "Expected polymorphic generic type")){
-                freestrs(generics, generics_length);
+                free_string_list(generics, generics_length);
                 return FAILURE;
             }
 
             if(tokens[*i].id != TOKEN_POLYMORPH){
                 compiler_panic(ctx->compiler, ctx->tokenlist->sources[*i], "Expected polymorphic generic type");
-                freestrs(generics, generics_length);
+                free_string_list(generics, generics_length);
                 return FAILURE;
             }
 
-            generics[generics_length++] = tokens[*i].data;
-            tokens[(*i)++].data = NULL; // Take ownership
+            generics[generics_length++] = parse_ctx_peek_data_take(ctx);
+            *i += 1;
 
             if(parse_ignore_newlines(ctx, "Expected '>' or ',' after polymorphic generic type")){
-                freestrs(generics, generics_length);
+                free_string_list(generics, generics_length);
                 return FAILURE;
             }
 
             if(tokens[*i].id == TOKEN_NEXT){
                 if(tokens[++(*i)].id == TOKEN_GREATERTHAN){
                     compiler_panic(ctx->compiler, ctx->tokenlist->sources[*i], "Expected polymorphic generic type after ',' in generics list");
-                    freestrs(generics, generics_length);
+                    free_string_list(generics, generics_length);
                     return FAILURE;
                 }
             } else if(tokens[*i].id != TOKEN_GREATERTHAN){
                 compiler_panic(ctx->compiler, ctx->tokenlist->sources[*i], "Expected ',' after polymorphic generic type");
-                freestrs(generics, generics_length);
+                free_string_list(generics, generics_length);
                 return FAILURE;
             }
         }
@@ -163,7 +179,7 @@ errorcode_t parse_composite_head(parse_ctx_t *ctx, bool is_union, strong_cstr_t 
         *out_name = parse_take_word(ctx, "Expected structure name after 'struct' keyword");
 
         if(*out_name == NULL){
-            freestrs(generics, generics_length);
+            free_string_list(generics, generics_length);
             return FAILURE;
         }
     }
@@ -298,7 +314,7 @@ errorcode_t parse_composite_field(parse_ctx_t *ctx, ast_field_map_t *inout_field
         *inout_backfill -= 1;
     }
 
-    ast_layout_skeleton_add_type(inout_skeleton, ast_type_clone(&field_type));
+    ast_layout_skeleton_add_type(inout_skeleton, field_type);
     return SUCCESS;
 }
 
@@ -406,7 +422,7 @@ errorcode_t parse_create_record_constructor(parse_ctx_t *ctx, weak_cstr_t name, 
         return FAILURE;
     }
 
-    bool would_collide_with_entry = strcmp(name, ctx->compiler->entry_point) == 0;
+    bool would_collide_with_entry = streq(name, ctx->compiler->entry_point);
     if(would_collide_with_entry){
         compiler_panicf(ctx->compiler, source, "Name of record type '%s' conflicts with name of entry point", name);
         return FAILURE;
@@ -426,7 +442,15 @@ errorcode_t parse_create_record_constructor(parse_ctx_t *ctx, weak_cstr_t name, 
 
     funcid_t ast_func_id = (funcid_t) ast->funcs_length;
     ast_func_t *func = &ast->funcs[ast->funcs_length++];
-    ast_func_create_template(func, strclone(name), false, false, false, false, source, false, strclone(name));
+
+    ast_func_create_template(func, &(ast_func_head_t){
+        .name = strclone(name),
+        .source = NULL_SOURCE,
+        .is_foreign = false,
+        .is_entry = false,
+        .prefixes = {0},
+        .export_name = NULL,
+    });
 
     if(func->traits != TRAIT_NONE){
         compiler_panicf(ctx->compiler, source, "Name of record type '%s' conflicts with special symbol", name);
@@ -435,8 +459,7 @@ errorcode_t parse_create_record_constructor(parse_ctx_t *ctx, weak_cstr_t name, 
 
     // Figure out AST type to return for record
     if(generics){
-        strong_cstr_t *type_generics = strsclone(generics, generics_length);
-        ast_type_make_base_with_generics(&func->return_type, strclone(name), type_generics, generics_length);
+        ast_type_make_base_with_polymorphs(&func->return_type, strclone(name), generics, generics_length);
     } else {
         ast_type_make_base(&func->return_type, strclone(name));
     }
@@ -472,13 +495,16 @@ errorcode_t parse_create_record_constructor(parse_ctx_t *ctx, weak_cstr_t name, 
         }
     }
 
-    // Set statements
-    func->statements_capacity = func->arity + 2;
-    func->statements_length = func->statements_capacity;
-    func->statements = malloc(sizeof(ast_expr_t*) * func->statements_capacity);
+    length_t num_stmts = func->arity + 2;
+
+    func->statements = (ast_expr_list_t){
+        .statements = malloc(sizeof(ast_expr_t*) * num_stmts),
+        .length = num_stmts,
+        .capacity = num_stmts,
+    };
 
     trait_t traits = AST_EXPR_DECLARATION_POD | AST_EXPR_DECLARATION_ASSIGN_POD;
-    ast_expr_create_declaration(&func->statements[0], all_primitive ? EXPR_DECLAREUNDEF : EXPR_DECLARE, source, master_variable_name, ast_type_clone(&func->return_type), traits, NULL);
+    ast_expr_create_declaration(&func->statements.statements[0], all_primitive ? EXPR_DECLAREUNDEF : EXPR_DECLARE, source, master_variable_name, ast_type_clone(&func->return_type), traits, NULL);
 
     for(length_t i = 0; i != func->arity; i++){
         weak_cstr_t field_name = field_map->arrows[i].name;
@@ -494,7 +520,7 @@ errorcode_t parse_create_record_constructor(parse_ctx_t *ctx, weak_cstr_t name, 
         ast_expr_t *variable;
         ast_expr_create_variable(&variable, field_name, source);
 
-        ast_expr_create_assignment(&func->statements[i + 1], EXPR_ASSIGN, source, mutable_expression, variable, false);
+        ast_expr_create_assignment(&func->statements.statements[i + 1], EXPR_ASSIGN, source, mutable_expression, variable, false);
     }
 
     ast_expr_t *variable;
@@ -503,7 +529,7 @@ errorcode_t parse_create_record_constructor(parse_ctx_t *ctx, weak_cstr_t name, 
     ast_expr_list_t last_minute;
     memset(&last_minute, 0, sizeof(ast_expr_list_t));
 
-    ast_expr_create_return(&func->statements[func->arity + 1], source, variable, last_minute);
+    ast_expr_create_return(&func->statements.statements[func->arity + 1], source, variable, last_minute);
 
     // Add function to polymorphic function registry if it's polymorphic
     if(is_polymorphic){

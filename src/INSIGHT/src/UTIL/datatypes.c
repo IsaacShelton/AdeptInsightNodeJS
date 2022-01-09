@@ -1,8 +1,14 @@
 
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "UTIL/color.h"
-#include "UTIL/trait.h"
-#include "UTIL/ground.h"
 #include "UTIL/datatypes.h"
+#include "UTIL/ground.h"
+#include "UTIL/trait.h"
 
 char *int_to_string_impl(int64 value, char *out_buffer, int base, weak_cstr_t suffix){
     // -----------------------------------------------------------
@@ -57,9 +63,10 @@ strong_cstr_t float64_to_string(float64 value, weak_cstr_t suffix){
     // -----------------------------------------------------------
 
     // TODO: Do a real implementation
-    char *memory = (char*) malloc(325 + strlen(suffix));
-    sprintf(memory, "%f%s", value, suffix);
-    return memory;
+    size_t buf_size = 325 + strlen(suffix);
+    char *buf = (char*) malloc(buf_size);
+    snprintf(buf, buf_size, "%f%s", value, suffix);
+    return buf;
 }
 
 int64 string_to_int64(weak_cstr_t string, int base){
@@ -78,33 +85,34 @@ uint64 string_to_uint64(weak_cstr_t string, int base){
     length_t length = strlen(string);
     if(length == 0) return 0; // Avoid problems with zero length strings
 
-    uint64 power = 1;
+    uint64_t power = 1;
     length_t i = length - 1;
-    uint64 result = 0;
+    uint64_t result = 0;
 
+    // Faster specialized method for base 10 integers
     if(base == 10){
-        // Faster method for parsing base 10 integers
-    
         do {
             char c = string[i];
             if(c < '0' || c > '9') return 0;
-            result += (uint64) (c - '0') * power;
+            result += (uint64_t) (c - '0') * power;
             power *= 10;
         } while(i-- != 0);
 
         return result;
     }
 
-    // Slightly slower method for parsing integers of any base
+    // Slightly slower method for parsing integers of "any" base
     // NOTE: Maximum base supported is 36
     
     do {
         char c = string[i];
 
-        // bool is_arabic_digit             = c_traits & TRAIT_1
-        // bool is_extended_digit           = c_traits & TRAIT_2
-        // bool is_extended_lowercase_digit = c_traits & TRAIT_3
-        // bool is_digit                    = c_traits != TRAIT_NONE
+        // -------------------------------------------------------
+        // | is_arabic_digit              =  cinfo & TRAIT_1     |
+        // | is_extended_digit            =  cinfo & TRAIT_2     |
+        // | is_extended_lowercase_digit  =  cinfo & TRAIT_3     |
+        // | is_any_digit                 =  cinfo != TRAIT_NONE |
+        // -------------------------------------------------------
         trait_t cinfo = (c >= '0' && c <= '9')
             ? TRAIT_1 // is_arabic_digit
             : (c >= 'A' && c < 'A' + base - 10) // NOTE: Checking that (base > 10) isn't necessary
@@ -133,6 +141,6 @@ bool string_to_int_must_be_uint64(weak_cstr_t string, length_t length, int base)
     if(base == 16) return length != 16 ? length > 16 : strncmp(string, "7FFFFFFFFFFFFFFF", 16) > 0;
     
     // Base Unimplemented
-    internalerrorprintf("string_to_int_must_be_uint64() got unimplemented base %d\n", base);
+    panic("string_to_int_must_be_uint64() - Unsupported base %d\n", base);
     return false;
 }

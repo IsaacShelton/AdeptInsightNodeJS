@@ -1,6 +1,11 @@
 
-#include "UTIL/util.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "UTIL/ground.h"
 #include "UTIL/string_builder.h"
+#include "UTIL/util.h"
 
 void string_builder_init(string_builder_t *builder){
     builder->buffer = NULL;
@@ -10,6 +15,13 @@ void string_builder_init(string_builder_t *builder){
 
 strong_cstr_t string_builder_finalize(string_builder_t *builder){
     return builder->buffer;
+}
+
+strong_lenstr_t string_builder_finalize_with_length(string_builder_t *builder){
+    return (strong_lenstr_t){
+        .cstr = builder->buffer,
+        .length = builder->length,
+    };
 }
 
 void string_builder_abandon(string_builder_t *builder){
@@ -26,4 +38,14 @@ void string_builder_append_view(string_builder_t *builder, const char *portion, 
     memcpy(&builder->buffer[builder->length], portion, portion_length);
     builder->length += portion_length;
     builder->buffer[builder->length] = 0x00;
+}
+
+void string_builder_append_char(string_builder_t *builder, char character){
+    string_builder_append_view(builder, &character, 1);
+}
+
+void string_builder_append_int(string_builder_t *builder, int integer){
+    char buffer[32];
+    sprintf(buffer, "%d", integer);
+    string_builder_append(builder, buffer);
 }

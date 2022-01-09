@@ -5,6 +5,7 @@
 #include "UTIL/jsmn.h"
 #include "UTIL/jsmn_helper.h"
 #include "UTIL/util.h"
+#include "UTIL/string.h"
 
 void query_init(query_t *query){
     query->kind = QUERY_KIND_UNRECOGNIZED;
@@ -21,121 +22,92 @@ void query_free(query_t *query){
 }
 
 successful_t query_parse(weak_cstr_t json, query_t *out_query, strong_cstr_t *out_error){
-    length_t json_length = strlen(json);
-    jsmn_parser parser;
-    jsmn_init(&parser);
-
-    int required_tokens = jsmn_parse(&parser, json, json_length, NULL, 0);
-    jsmntok_t *tokens = malloc(sizeof(jsmntok_t) * required_tokens);
-
-    jsmn_init(&parser);
-    int parse_error = jsmn_parse(&parser, json, json_length, tokens, required_tokens);
-
-    if(parse_error < 0 || required_tokens != parse_error){
-        if(out_error) *out_error = mallocandsprintf("Failed to parse JSON, %s", jsmn_helper_parse_fail_reason(parse_error));
-        free(tokens);
-        return false;
+    jsmnh_obj_ctx_t ctx;
+    if(jsmnh_obj_ctx_easy_init(&ctx, json, strlen(json))){
+        if(out_error) *out_error = strclone("Failed to parse JSON structure");
+        goto failure;
     }
-
-    // Ensure request is an object
-    if(!jsmn_helper_get_object(json, tokens, required_tokens, 0)){
-        free(tokens);
-        return false;
-    }
-
-    jsmntok_t master_object_token = tokens[0];
-    length_t section_token_index = 1;
-    length_t total_sections = master_object_token.size;
-    char key[128];
-    char tmp[1024];
 
     query_init(out_query);
 
-    for(length_t section = 0; section != total_sections; section++){
+    for(length_t section = 0; section != ctx.total_sections; section++){
         // Get next key inside request
-        if(!jsmn_helper_get_string(json, tokens, required_tokens, section_token_index++, key, sizeof(key))){
-            if(out_error) *out_error = mallocandsprintf("Failed to process JSON", jsmn_helper_parse_fail_reason(parse_error));
-            goto cleanup_and_fail;
+        if(jsmnh_obj_ctx_read_key(&ctx)){
+            if(out_error) *out_error = strclone("Failed to parse JSON key");
+            goto failure;
         }
 
-        if(strcmp(key, "query") == 0){
+        if(jsmnh_obj_ctx_eq(&ctx, "query")){
             // "query" : "..."
-            if(!jsmn_helper_get_string(json, tokens, required_tokens, section_token_index, tmp, sizeof(tmp))){
+            if(!jsmnh_obj_ctx_get_fixed_string(&ctx, ctx.value.content, ctx.value.capacity)){
                 *out_error = mallocandsprintf("Expected string value for 'query'");
-                goto cleanup_and_fail;
+                goto failure;
             }
 
-            if(!query_set_kind_by_name(out_query, tmp)){
+            if(!query_set_kind_by_name(out_query, ctx.value.content)){
                 if(out_error){
-                    strong_cstr_t escaped = json_stringify_string(tmp);
+                    strong_cstr_t escaped = json_stringify_string(ctx.value.content);
                     *out_error = mallocandsprintf("Unrecognized query kind %s", escaped);
                     free(escaped);
                 }
-                goto cleanup_and_fail;
+                goto failure;
             }
-        } else if(strcmp(key, "infrastructure") == 0){
+        } else if(jsmnh_obj_ctx_eq(&ctx, "infrastructure")){
             // "infrastructure" : "..."
-            if(!jsmn_helper_get_string(json, tokens, required_tokens, section_token_index, tmp, sizeof(tmp))){
-                *out_error = mallocandsprintf("Expected string value for '%s'", key);
-                goto cleanup_and_fail;
+            if(!jsmnh_obj_ctx_get_variable_string(&ctx, &out_query->infrastructure)){
+                *out_error = mallocandsprintf("Expected string value for '%s'", ctx.value.content);
+                goto failure;
             }
-            
-            out_query->infrastructure = strclone(tmp);
-        } else if(strcmp(key, "filename") == 0){
+        } else if(jsmnh_obj_ctx_eq(&ctx, "filename")){
             // "filename" : "..."
-            if(!jsmn_helper_get_string(json, tokens, required_tokens, section_token_index, tmp, sizeof(tmp))){
-                *out_error = mallocandsprintf("Expected string value for '%s'", key);
-                goto cleanup_and_fail;
+            if(!jsmnh_obj_ctx_get_variable_string(&ctx, &out_query->filename)){
+                *out_error = mallocandsprintf("Expected string value for '%s'", ctx.value.content);
+                goto failure;
             }
-            
-            out_query->filename = strclone(tmp);
-        } else if(strcmp(key, "code") == 0){
+        } else if(jsmnh_obj_ctx_eq(&ctx, "code")){
             // "code" : "..."
 
-            strong_cstr_t escaped_code_string;
-            if(!jsmn_helper_get_vstring(json, tokens, required_tokens, section_token_index, &escaped_code_string)){
-                *out_error = mallocandsprintf("Expected string value for '%s'", key);
-                goto cleanup_and_fail;
+            strong_cstr_t escaped;
+            if(!jsmnh_obj_ctx_get_variable_string(&ctx, &escaped)){
+                *out_error = mallocandsprintf("Expected string value for '%s'", ctx.value.content);
+                goto failure;
             }
 
-            strong_cstr_t unescaped_code_string = unescape_code_string(escaped_code_string);
-            free(escaped_code_string);
-            out_query->code = unescaped_code_string;
-        } else if(strcmp(key, "warnings") == 0){
+            out_query->code = unescape_code_string(escaped);
+            free(escaped);
+        } else if(jsmnh_obj_ctx_eq(&ctx, "warnings")){
             // "warnings" : ...
 
             bool warnings;
-            if(!jsmn_helper_get_boolean(json, tokens, required_tokens, section_token_index, &warnings)){
-                *out_error = mallocandsprintf("Expected boolean value for '%s'", key);
-                goto cleanup_and_fail;
+            if(!jsmnh_obj_ctx_get_boolean(&ctx, &out_query->warnings)){
+                *out_error = mallocandsprintf("Expected boolean value for '%s'", ctx.value.content);
+                goto failure;
             }
-
-            out_query->warnings = warnings;
         } else {
             // "???" : "???"
-            if(out_error) *out_error = mallocandsprintf("Unrecognized key '%s'", key);
-            goto cleanup_and_fail;
+            if(out_error) *out_error = mallocandsprintf("Unrecognized key '%s'", ctx.value.content);
+            goto failure;
         }
 
-        section_token_index += jsmn_helper_subtoken_count(tokens, section_token_index);
+        jsmnh_obj_ctx_blind_advance(&ctx);
     }
 
-    free(tokens);
+    jsmnh_obj_ctx_free(&ctx);
     return true;
 
-cleanup_and_fail:
-    free(tokens);
+failure:
+    jsmnh_obj_ctx_free(&ctx);
     query_free(out_query);
     return false;
 }
 
 successful_t query_set_kind_by_name(query_t *out_query, weak_cstr_t kind_name){
-    if(strcmp(kind_name, "validate") == 0){
+    if(streq(kind_name, "validate")){
         out_query->kind = QUERY_KIND_VALIDATE;
         return true;
     }
 
-    if(strcmp(kind_name, "ast") == 0){
+    if(streq(kind_name, "ast")){
         out_query->kind = QUERY_KIND_AST;
         return true;
     }
@@ -158,6 +130,7 @@ strong_cstr_t unescape_code_string(weak_cstr_t escaped){
 
     while(*s){
         expand((void**) &result, sizeof(char), length, &capacity, 1, 4096);
+
         if(*s != '\\'){
             result[length++] = *(s++);
             continue;
@@ -169,6 +142,7 @@ strong_cstr_t unescape_code_string(weak_cstr_t escaped){
         case '"':  result[length++] = '"';  break;
         case '\\': result[length++] = '\\'; break;
         case '\'': result[length++] = '\''; break;
+        case 'e':  result[length++] = 0x1B; break;
         default:
             printf("AdeptInsightNodeJS internal error: unescape_code_string() got bad escape code %c\n", *s);
             s--;

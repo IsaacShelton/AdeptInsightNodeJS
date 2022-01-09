@@ -2,9 +2,10 @@
 #include "ValidationQuery.h"
 
 #include "LEX/lex.h"
+#include "DRVR/compiler.h"
 #include "PARSE/parse.h"
 #include "UTIL/util.h"
-#include "DRVR/compiler.h"
+#include "UTIL/string.h"
 #include "UTIL/filename.h"
 #include "UTIL/__insight_undo_overloads.h"
 

@@ -1,9 +1,19 @@
 
-#include "UTIL/color.h"
-#include "UTIL/search.h"
-#include "UTIL/filename.h"
-#include "PARSE/parse_pragma.h"
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "AST/ast.h"
+#include "DRVR/compiler.h"
+#include "DRVR/object.h"
+#include "LEX/token.h"
 #include "PARSE/parse_ctx.h"
+#include "PARSE/parse_pragma.h"
+#include "TOKEN/token_data.h"
+#include "UTIL/color.h"
+#include "UTIL/filename.h"
+#include "UTIL/ground.h"
+#include "UTIL/search.h"
 
 #ifdef __APPLE__
 #include "TargetConditionals.h"
@@ -18,7 +28,7 @@ errorcode_t parse_pragma(parse_ctx_t *ctx){
     maybe_null_weak_cstr_t read = NULL;
 
     if(ctx->composite_association != NULL){
-        compiler_panicf(ctx->compiler, ctx->tokenlist->sources[*ctx->i], "Cannot pass pragma directives within struct domain");
+        compiler_panicf(ctx->compiler, parse_ctx_peek_source(ctx), "Cannot pass pragma directives within struct domain");
         return FAILURE;
     }
 
@@ -92,23 +102,23 @@ errorcode_t parse_pragma(parse_ctx_t *ctx){
         }
 
         // Check to make sure we support the target version
-        if(strcmp(read, "2.0") == 0 || strcmp(read, "2.1") == 0){
+        if(streq(read, "2.0") || streq(read, "2.1")){
             if(!(ctx->compiler->ignore & COMPILER_IGNORE_PARTIAL_SUPPORT)){
                 if(compiler_warnf(ctx->compiler, ctx->tokenlist->sources[*i], "This compiler only partially supports version '%s'", read))
                     return FAILURE;
             }
-        } else if(strcmp(read, "2.2") != 0
-               && strcmp(read, "2.3") != 0
-               && strcmp(read, "2.4") != 0
-               && strcmp(read, "2.5") != 0
-               && strcmp(read, "2.6") != 0){
+        } else if(!streq(read, "2.2") 
+               && !streq(read, "2.3") 
+               && !streq(read, "2.4") 
+               && !streq(read, "2.5") 
+               && !streq(read, "2.6")){
             compiler_panicf(ctx->compiler, ctx->tokenlist->sources[*i], "This compiler doesn't support version '%s'", read);
             puts("\nSupported Versions: '2.6', '2.5', '2.4', '2.3', '2.2', '2.1', '2.0'");
             return FAILURE;
         }
 
         // Guess default standard library version from 'pragma compiler_version' if none specified
-        if(!(ctx->compiler->traits & COMPILER_FORCE_STDLIB) && ctx->compiler->default_stdlib == NULL && strcmp(directive_string, "compiler_version") == 0){
+        if(!(ctx->compiler->traits & COMPILER_FORCE_STDLIB) && ctx->compiler->default_stdlib == NULL && streq(directive_string, "compiler_version")){
             ctx->compiler->default_stdlib = read;
         }
 
@@ -182,7 +192,7 @@ errorcode_t parse_pragma(parse_ctx_t *ctx){
         }
 
         // Don't allow changing the name of the entry point if it was already changed to something that wasn't main
-        if(strcmp(ctx->compiler->entry_point, "main") != 0){
+        if(!streq(ctx->compiler->entry_point, "main")){
             compiler_panicf(ctx->compiler, ctx->tokenlist->sources[*i - 1], "Entry point is already defined as '%s'", ctx->compiler->entry_point);
             return FAILURE;
         }
@@ -264,10 +274,10 @@ errorcode_t parse_pragma(parse_ctx_t *ctx){
         }
 
         // Change the optimization level accordingly
-        if(strcmp(read, "none") == 0)            ctx->compiler->optimization = OPTIMIZATION_NONE;
-        else if(strcmp(read, "less") == 0)       ctx->compiler->optimization = OPTIMIZATION_LESS;
-        else if(strcmp(read, "normal") == 0)     ctx->compiler->optimization = OPTIMIZATION_DEFAULT;
-        else if(strcmp(read, "aggressive") == 0) ctx->compiler->optimization = OPTIMIZATION_AGGRESSIVE;
+        if(streq(read, "none"))            ctx->compiler->optimization = OPTIMIZATION_NONE;
+        else if(streq(read, "less"))       ctx->compiler->optimization = OPTIMIZATION_LESS;
+        else if(streq(read, "normal"))     ctx->compiler->optimization = OPTIMIZATION_DEFAULT;
+        else if(streq(read, "aggressive")) ctx->compiler->optimization = OPTIMIZATION_AGGRESSIVE;
         else {
             // Invalid optimization level
             compiler_panic(ctx->compiler, ctx->tokenlist->sources[*i], "Invalid optimization level after 'pragma optimization'");

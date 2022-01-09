@@ -1,12 +1,20 @@
 
-#include "UTIL/util.h"
+#include <stdlib.h>
+
+#include "AST/ast.h"
+#include "DRVR/compiler.h"
+#include "LEX/token.h"
+#include "PARSE/parse_ctx.h"
 #include "PARSE/parse_enum.h"
 #include "PARSE/parse_util.h"
+#include "TOKEN/token_data.h"
+#include "UTIL/ground.h"
+#include "UTIL/util.h"
 
 errorcode_t parse_enum(parse_ctx_t *ctx){
     char **kinds = NULL;
     length_t length = 0;
-    source_t source = ctx->tokenlist->sources[*ctx->i];
+    source_t source = parse_ctx_peek_source(ctx);
 
     if(ctx->composite_association != NULL){
         compiler_panicf(ctx->compiler, source, "Cannot declare enum within struct domain");

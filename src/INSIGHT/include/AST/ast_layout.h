@@ -8,9 +8,12 @@
     ---------------------------------------------------------------------------
 */
 
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "AST/ast_type_lean.h"
 #include "UTIL/ground.h"
 #include "UTIL/trait.h"
-#include "AST/ast_type_lean.h"
 
 // ---------------- AST_LAYOUT_ENDPOINT_END_INDEX ----------------
 // Special number used to indicate that no more indices
@@ -115,8 +118,6 @@ typedef struct {
 // Constructs an empty AST field map
 void ast_field_map_init(ast_field_map_t *field_map);
 
-struct ast_layout_bone;
-
 // ---------------- ast_layout_skeleton_t ----------------
 // Represents a composite type layout, without any names attached
 // For example, the type: 'struct (bool, union (float, *ubyte))'
@@ -183,7 +184,7 @@ void ast_layout_free(ast_layout_t *layout);
 
 // ---------------- ast_layout_clone ----------------
 // Clones an 'ast_layout_t'
-ast_layout_t ast_layout_clone(ast_layout_t *layout);
+ast_layout_t ast_layout_clone(const ast_layout_t *layout);
 
 // ---------------- ast_layout_str ----------------
 // Converts an 'ast_layout_t' to a string
@@ -224,7 +225,7 @@ void ast_layout_skeleton_free(ast_layout_skeleton_t *skeleton);
 
 // ---------------- ast_layout_skeleton_clone ----------------
 // Clones an 'ast_layout_skeleton_t'
-ast_layout_skeleton_t ast_layout_skeleton_clone(ast_layout_skeleton_t *skeleton);
+ast_layout_skeleton_t ast_layout_skeleton_clone(const ast_layout_skeleton_t *skeleton);
 
 // ---------------- ast_layout_skeleton_str ----------------
 // Converts an 'ast_layout_skeleton_t' to a string
@@ -279,7 +280,7 @@ void ast_field_map_free(ast_field_map_t *field_map);
 
 // ---------------- ast_field_map_clone ----------------
 // Clones an 'ast_field_map_t'
-ast_field_map_t ast_field_map_clone(ast_field_map_t *field_map);
+ast_field_map_t ast_field_map_clone(const ast_field_map_t *field_map);
 
 // ---------------- ast_field_maps_identical ----------------
 // Returns whether two AST field maps are identical

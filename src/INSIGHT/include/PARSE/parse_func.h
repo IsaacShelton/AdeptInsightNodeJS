@@ -15,8 +15,7 @@ errorcode_t parse_func(parse_ctx_t *ctx);
 
 // ------------------ parse_func_head ------------------
 // Parses the head of a function definition
-errorcode_t parse_func_head(parse_ctx_t *ctx, strong_cstr_t *out_name, bool *out_is_stdcall,
-        bool *out_is_foreign, bool *out_is_verbatim, bool *out_is_implicit, maybe_null_strong_cstr_t *out_export_name);
+errorcode_t parse_func_head(parse_ctx_t *ctx, ast_func_head_t *out_head);
 
 // ------------------ parse_func_body ------------------
 // Parses the body of a function
@@ -30,9 +29,9 @@ errorcode_t parse_func_arguments(parse_ctx_t *ctx, ast_func_t *func);
 // Parses a single argument that a function takes
 errorcode_t parse_func_argument(parse_ctx_t *ctx, ast_func_t *func, length_t capacity, length_t *backfill, bool *out_is_solid);
 
-// ------------------ parse_func_default_arg_value ------------------
-// Parses the default value portion of a function argument
-errorcode_t parse_func_default_arg_value(parse_ctx_t *ctx, ast_func_t *func, length_t capacity, length_t *backfill);
+// ------------------ parse_func_default_arg_value_if_applicable ------------------
+// Parses the default value portion of a function argument if the current token at '*ctx->i' is an assign token
+errorcode_t parse_func_default_arg_value_if_applicable(parse_ctx_t *ctx, ast_func_t *func, length_t capacity, length_t *backfill);
 
 // ------------------ parse_func_backfill_arguments ------------------
 // Backfills arguments that weren't initially given a type / default value
@@ -44,7 +43,7 @@ void parse_func_grow_arguments(ast_func_t *func, length_t backfill, length_t *ca
 
 // ------------------ parse_func_prefixes ------------------
 // Handles 'stdcall', 'verbatim', 'implicit', and 'external' descriptive keywords in function head
-void parse_func_prefixes(parse_ctx_t *ctx, bool *out_is_stdcall, bool *out_is_verbatim, bool *out_is_implicit, bool *out_is_external);
+void parse_func_prefixes(parse_ctx_t *ctx, ast_func_prefixes_t *out_prefixes);
 
 // ------------------ parse_free_unbackfilled_arguments ------------------
 // Frees function arguments that never got backfilled

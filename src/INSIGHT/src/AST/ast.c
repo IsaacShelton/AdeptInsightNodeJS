@@ -1,10 +1,19 @@
 
 #include "AST/ast.h"
+
+#include <assert.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "AST/TYPE/ast_type_make.h"
+#include "AST/UTIL/string_builder_extensions.h"
+#include "AST/ast_expr.h"
 #include "AST/ast_type.h"
-#include "UTIL/util.h"
-#include "UTIL/color.h"
-#include "UTIL/string_builder.h"
 #include "DRVR/compiler.h"
+#include "UTIL/color.h"
+#include "UTIL/string.h"
+#include "UTIL/string_builder.h"
+#include "UTIL/util.h"
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten/emscripten.h>
@@ -39,6 +48,7 @@ void ast_init(ast_t *ast, unsigned int cross_compile_for){
     ast_type_make_base(&ast->common.ast_int_type, strclone("int"));
     ast_type_make_base(&ast->common.ast_usize_type, strclone("usize"));
     ast->common.ast_variadic_array = NULL;
+    ast->common.ast_initializer_list = NULL;
 
     ast->type_table = NULL;
     ast->meta_definitions = NULL;
@@ -187,26 +197,27 @@ void ast_free(ast_t *ast){
 
     ast_type_free(&ast->common.ast_int_type);
     ast_type_free(&ast->common.ast_usize_type);
+    ast_type_free_fully(ast->common.ast_variadic_array);
+    ast_type_free_fully(ast->common.ast_initializer_list);
 
-    if(ast->common.ast_variadic_array != NULL){
-        ast_type_free_fully(ast->common.ast_variadic_array);
-    }
-    
     type_table_free(ast->type_table);
     free(ast->type_table);
 
     for(i = 0; i != ast->meta_definitions_length; i++){
         meta_expr_free_fully(ast->meta_definitions[i].value);
     }
+
     free(ast->meta_definitions);
     free(ast->polymorphic_funcs);
     free(ast->polymorphic_methods);
+
     for(i = 0; i != ast->polymorphic_composites_length; i++){
         ast_polymorphic_composite_t *poly_composite = &ast->polymorphic_composites[i];
 
         ast_free_composites((ast_composite_t*) poly_composite, 1);
-        freestrs(poly_composite->generics, poly_composite->generics_length);
+        free_string_list(poly_composite->generics, poly_composite->generics_length);
     }
+
     free(ast->polymorphic_composites);
 }
 
@@ -214,19 +225,12 @@ void ast_free_functions(ast_func_t *functions, length_t functions_length){
     for(length_t i = 0; i != functions_length; i++){
         ast_func_t *func = &functions[i];
         free(func->name);
- 
-        if(func->traits & AST_FUNC_FOREIGN){
-            for(length_t a = 0; a != func->arity; a++){
-                ast_type_free(&func->arg_types[a]);
-            }
-        } else {
-            for(length_t a = 0; a != func->arity; a++){
-                free(func->arg_names[a]);
-                ast_type_free(&func->arg_types[a]);
-            }
+
+        if(func->arg_names){
+            free_string_list(func->arg_names, func->arity);
         }
 
-        free(func->arg_names);
+        ast_types_free(func->arg_types, func->arity);
         free(func->arg_types);
         free(func->arg_sources);
         free(func->arg_flows);
@@ -235,8 +239,7 @@ void ast_free_functions(ast_func_t *functions, length_t functions_length){
         if(func->arg_defaults) ast_exprs_free_fully(func->arg_defaults, func->arity);
         
         free(func->variadic_arg_name);
-        ast_free_statements(func->statements, func->statements_length);
-        free(func->statements);
+        ast_expr_list_free(&func->statements);
         ast_type_free(&func->return_type);
         free(func->export_as);
     }
@@ -248,18 +251,6 @@ void ast_free_function_aliases(ast_func_alias_t *faliases, length_t length){
         free(falias->from);
         ast_types_free_fully(falias->arg_types, falias->arity);
     }
-}
-
-void ast_free_statements(ast_expr_t **statements, length_t length){
-    for(length_t s = 0; s != length; s++){
-        ast_expr_free(statements[s]); // Free statement-specific memory
-        free(statements[s]); // Free statement memory
-    }
-}
-
-void ast_free_statements_fully(ast_expr_t **statements, length_t length){
-    ast_free_statements(statements, length);
-    free(statements);
 }
 
 void ast_free_composites(ast_composite_t *composites, length_t composites_length){
@@ -274,7 +265,7 @@ void ast_free_composites(ast_composite_t *composites, length_t composites_length
 void ast_free_constants(ast_constant_t *constants, length_t constants_length){
     for(length_t i = 0; i != constants_length; i++){
         ast_constant_t *constant = &constants[i];
-        if(constant->expression) ast_expr_free_fully(constant->expression);
+        ast_expr_free_fully(constant->expression);
         free(constant->name);
     }
 }
@@ -291,9 +282,7 @@ void ast_free_globals(ast_global_t *globals, length_t globals_length){
         ast_global_t *global = &globals[i];
         free(global->name);
         ast_type_free(&global->type);
-        if(global->initial != NULL){
-            ast_expr_free_fully(global->initial);
-        }
+        ast_expr_free_fully(global->initial);
     }
 }
 
@@ -310,8 +299,7 @@ void ast_dump(ast_t *ast, const char *filename){
     length_t i;
 
     if(file == NULL){
-        internalerrorprintf("Failed to open ast dump file\n");
-        return;
+        panic("ast_dump() - Failed to open ast dump file\n");
     }
 
     ast_dump_enums(file, ast->enums, ast->enums_length);
@@ -322,7 +310,7 @@ void ast_dump(ast_t *ast, const char *filename){
     for(i = 0; i != ast->aliases_length; i++){
         ast_alias_t *alias = &ast->aliases[i];
 
-        char *s = ast_type_str(&alias->type);
+        strong_cstr_t s = ast_type_str(&alias->type);
         fprintf(file, "alias %s = %s\n", alias->name, s);
         free(s);
     }
@@ -342,10 +330,10 @@ void ast_dump_functions(FILE *file, ast_func_t *functions, length_t functions_le
         strong_cstr_t return_type_string = ast_type_str(&func->return_type);
 
         if(func->traits & AST_FUNC_FOREIGN){
-            fprintf(file, "foreign %s(%s) %s\n", func->name, arguments_string, return_type_string);
+            fprintf(file, "foreign %s(%s) %s\n", func->name, arguments_string ? arguments_string : "", return_type_string);
         } else {
-            fprintf(file, "func %s(%s) %s {\n", func->name, arguments_string, return_type_string);
-            if(func->statements != NULL) ast_dump_statements(file, func->statements, func->statements_length, 1);
+            fprintf(file, "func %s(%s) %s {\n", func->name, arguments_string ? arguments_string : "", return_type_string);
+            ast_dump_statement_list(file, &func->statements, 1);
             fprintf(file, "}\n");
         }
 
@@ -359,24 +347,20 @@ strong_cstr_t ast_func_args_str(ast_func_t *func){
     string_builder_init(&builder);
 
     for(length_t i = 0; i != func->arity; i++){
-        if(func->arg_names){
+        if(func->arg_names && func->arg_names[i]){
             string_builder_append(&builder, func->arg_names[i]);
-            string_builder_append(&builder, " ");
+            string_builder_append_char(&builder, ' ');
         }
 
         if(func->arg_type_traits && func->arg_type_traits[i] & AST_FUNC_ARG_TYPE_TRAIT_POD){
             string_builder_append(&builder, "POD ");
         }
 
-        strong_cstr_t typename = ast_type_str(&func->arg_types[i]);
-        string_builder_append(&builder, typename);
-        free(typename);
+        string_builder_append_type(&builder, &func->arg_types[i]);
 
         if(func->arg_defaults && func->arg_defaults[i]){
-            strong_cstr_t default_value = ast_expr_str(func->arg_defaults[i]);
             string_builder_append(&builder, " = ");
-            string_builder_append(&builder, default_value);
-            free(default_value);
+            string_builder_append_expr(&builder, func->arg_defaults[i]);
         }
 
         if(i + 1 != func->arity){
@@ -398,7 +382,13 @@ strong_cstr_t ast_func_args_str(ast_func_t *func){
     return string_builder_finalize(&builder);
 }
 
+void ast_dump_statement_list(FILE *file, ast_expr_list_t *statements, length_t indentation){
+    ast_dump_statements(file, statements->statements, statements->length, indentation);
+}
+
 void ast_dump_statements(FILE *file, ast_expr_t **statements, length_t length, length_t indentation){
+    // TODO: CLEANUP: Cleanup this messy code
+
     for(length_t s = 0; s != length; s++){
         // Print indentation
         indent(file, indentation);
@@ -448,7 +438,13 @@ void ast_dump_statements(FILE *file, ast_expr_t **statements, length_t length, l
                 char *variable_type_str = ast_type_str(&declare_stmt->type);
                 char *pod = declare_stmt->traits & AST_EXPR_DECLARATION_POD ? "POD " : "";
                 char *assign_pod = declare_stmt->traits & AST_EXPR_DECLARATION_ASSIGN_POD ? "POD " : "";
-                fprintf(file, (declare_stmt->value == NULL && !is_undef) ? "%s %s%s\n" : "%s %s%s = %s", declare_stmt->name, pod, assign_pod, variable_type_str);
+
+                if(declare_stmt->value == NULL && !is_undef){
+                    fprintf(file, "%s %s%s\n", declare_stmt->name, pod, variable_type_str);
+                } else {
+                    fprintf(file, "%s %s%s = %s", declare_stmt->name, pod, variable_type_str, assign_pod);
+                }
+
                 free(variable_type_str);
 
                 if(is_undef){
@@ -531,7 +527,7 @@ void ast_dump_statements(FILE *file, ast_expr_t **statements, length_t length, l
                 }
 
                 fprintf(file, "%s %s {\n", keyword_name, if_value_str);
-                ast_dump_statements(file, ((ast_expr_if_t*) statements[s])->statements, ((ast_expr_if_t*) statements[s])->statements_length, indentation+1);
+                ast_dump_statement_list(file, &typecast(ast_expr_if_t*, statements[s])->statements, indentation + 1);
                 indent(file, indentation);
                 fprintf(file, "}\n");
                 free(if_value_str);
@@ -541,10 +537,10 @@ void ast_dump_statements(FILE *file, ast_expr_t **statements, length_t length, l
                 ast_expr_t *if_value = ((ast_expr_ifelse_t*) statements[s])->value;
                 strong_cstr_t if_value_str = ast_expr_str(if_value);
                 fprintf(file, "%s %s {\n", (statements[s]->id == EXPR_IFELSE ? "if" : "unless"), if_value_str);
-                ast_dump_statements(file, ((ast_expr_ifelse_t*) statements[s])->statements, ((ast_expr_ifelse_t*) statements[s])->statements_length, indentation+1);
+                ast_dump_statement_list(file, &typecast(ast_expr_ifelse_t*, statements[s])->statements, indentation + 1);
                 indent(file, indentation);
                 fprintf(file, "} else {\n");
-                ast_dump_statements(file, ((ast_expr_ifelse_t*) statements[s])->else_statements, ((ast_expr_ifelse_t*) statements[s])->else_statements_length, indentation+1);
+                ast_dump_statement_list(file, &typecast(ast_expr_ifelse_t*, statements[s])->else_statements, indentation + 1);
                 indent(file, indentation);
                 fprintf(file, "}\n");
                 free(if_value_str);
@@ -562,7 +558,7 @@ void ast_dump_statements(FILE *file, ast_expr_t **statements, length_t length, l
                 }
 
                 fprintf(file, "{\n");
-                ast_dump_statements(file, repeat->statements, repeat->statements_length, indentation + 1);
+                ast_dump_statement_list(file, &repeat->statements, indentation + 1);
                 indent(file, indentation);
                 fprintf(file, "}\n");
                 free(value_str);
@@ -587,7 +583,7 @@ void ast_dump_statements(FILE *file, ast_expr_t **statements, length_t length, l
                     free(length_str);
                 }
 
-                ast_dump_statements(file, each_in->statements, each_in->statements_length, indentation + 1);
+                ast_dump_statement_list(file, &each_in->statements, indentation + 1);
                 indent(file, indentation);
                 fprintf(file, "}\n");
             }
@@ -619,19 +615,19 @@ void ast_dump_statements(FILE *file, ast_expr_t **statements, length_t length, l
                 fprintf(file, "switch (%s) {\n", value_str);
                 free(value_str);
 
-                for(length_t c = 0; c != switch_stmt->cases_length; c++){
+                for(length_t i = 0; i != switch_stmt->cases.length; i++){
                     indent(file, indentation);
-                    ast_case_t *expr_case = &switch_stmt->cases[c];
+                    ast_case_t *expr_case = &switch_stmt->cases.cases[i];
                     strong_cstr_t condition_str = ast_expr_str(expr_case->condition);
                     fprintf(file, "case (%s)\n", condition_str);
                     free(condition_str);
-                    ast_dump_statements(file, expr_case->statements, expr_case->statements_length, indentation + 1);
+                    ast_dump_statement_list(file, &expr_case->statements, indentation + 1);
                 }
 
-                if(switch_stmt->default_statements_length != 0){
+                if(switch_stmt->or_default.length != 0){
                     indent(file, indentation);
                     fprintf(file, "default\n");
-                    ast_dump_statements(file, switch_stmt->default_statements, switch_stmt->default_statements_length, indentation + 1);
+                    ast_dump_statement_list(file, &switch_stmt->or_default, indentation + 1);
                 }
 
                 indent(file, indentation);
@@ -709,8 +705,7 @@ void ast_dump_composite(FILE *file, ast_composite_t *composite, length_t additio
         fprintf(file, "union ");
         break;
     default:
-        internalerrorprintf("ast_dump_composite() got unknown layout kind\n");
-        return;
+        panic("ast_dump_composite() - Unrecognized layout kind %d\n", (int) layout->kind);
     }
 
     // Dump generics "<$K, $V>" if the composite is polymorphic
@@ -766,7 +761,7 @@ void ast_dump_composite_subfields(FILE *file, ast_layout_skeleton_t *skeleton, a
                 char *field_name = ast_field_map_get_name_of_endpoint(field_map, endpoint);
                 assert(field_name);
 
-                char *s = ast_type_str(&bone->type);
+                strong_cstr_t s = ast_type_str(&bone->type);
                 fprintf(file, "%s %s", field_name, s);
                 free(s);
             }
@@ -784,8 +779,7 @@ void ast_dump_composite_subfields(FILE *file, ast_layout_skeleton_t *skeleton, a
             fprintf(file, ")\n");
             break;
         default:
-            internalerrorprintf("ast_dump_composite() got unknown bone kind\n");
-            return;
+            panic("ast_dump_composite() - Unrecognized bone kind %d\n", (int) bone->kind);
         }
     }
 
@@ -839,10 +833,8 @@ void ast_dump_enums(FILE *file, ast_enum_t *enums, length_t enums_length){
     }
 }
 
-void ast_func_create_template(ast_func_t *func, strong_cstr_t name, bool is_stdcall, bool is_foreign, bool is_verbatim,
-        bool is_implicit, source_t source, bool is_entry, maybe_null_strong_cstr_t export_as){
-    
-    func->name = name;
+void ast_func_create_template(ast_func_t *func, const ast_func_head_t *options){
+    func->name = options->name;
     func->arg_names = NULL;
     func->arg_types = NULL;
     func->arg_sources = NULL;
@@ -853,26 +845,29 @@ void ast_func_create_template(ast_func_t *func, strong_cstr_t name, bool is_stdc
     func->return_type.elements = NULL;
     func->return_type.elements_length = 0;
     func->return_type.source = NULL_SOURCE;
-    func->return_type.source.object_index = source.object_index;
+    func->return_type.source.object_index = options->source.object_index;
     func->traits = TRAIT_NONE;
     func->variadic_arg_name = NULL;
     func->variadic_source = NULL_SOURCE;
-    func->statements = NULL;
-    func->statements_length = 0;
-    func->statements_capacity = 0;
-    func->source = source;
-    func->export_as = export_as;
+    memset(&func->statements, 0, sizeof(ast_expr_list_t));
+    func->source = options->source;
+    func->export_as = options->export_name;
 
     #if ADEPT_INSIGHT_BUILD
-    func->end_source = source;
+    func->end_source = NULL_SOURCE;
     #endif
 
-    if(is_entry)                       func->traits |= AST_FUNC_MAIN;
-    if(strcmp(name, "__defer__") == 0) func->traits |= AST_FUNC_DEFER | (is_verbatim ? TRAIT_NONE : AST_FUNC_AUTOGEN);
-    if(strcmp(name, "__pass__") == 0)  func->traits |= AST_FUNC_PASS  | (is_verbatim ? TRAIT_NONE : AST_FUNC_AUTOGEN);
-    if(is_stdcall)                     func->traits |= AST_FUNC_STDCALL;
-    if(is_foreign)                     func->traits |= AST_FUNC_FOREIGN;
-    if(is_implicit)                    func->traits |= AST_FUNC_IMPLICIT;
+    if(options->is_entry)                 func->traits |= AST_FUNC_MAIN;
+    if(streq(options->name, "__defer__")) func->traits |= AST_FUNC_DEFER | (options->prefixes.is_verbatim ? TRAIT_NONE : AST_FUNC_AUTOGEN);
+    if(streq(options->name, "__pass__"))  func->traits |= AST_FUNC_PASS  | (options->prefixes.is_verbatim ? TRAIT_NONE : AST_FUNC_AUTOGEN);
+    if(options->prefixes.is_stdcall)      func->traits |= AST_FUNC_STDCALL;
+    if(options->prefixes.is_implicit)     func->traits |= AST_FUNC_IMPLICIT;
+    if(options->is_foreign)               func->traits |= AST_FUNC_FOREIGN;
+
+    // Handle WinMain
+    if(streq(options->name, "WinMain") && options->export_name && streq(options->export_name, "WinMain")){
+        func->traits |= AST_FUNC_WINMAIN;
+    }
 }
 
 bool ast_func_is_polymorphic(ast_func_t *func){
@@ -914,9 +909,9 @@ void ast_enum_init(ast_enum_t *enum_definition,  weak_cstr_t name, weak_cstr_t *
 }
 
 ast_composite_t *ast_composite_find_exact(ast_t *ast, const char *name){
-    // TODO: Maybe sort and do a binary search or something
+    // TODO: CLEANUP: SPEED: Maybe sort and do a binary search or something
     for(length_t i = 0; i != ast->composites_length; i++){
-        if(strcmp(ast->composites[i].name, name) == 0){
+        if(streq(ast->composites[i].name, name)){
             return &ast->composites[i];
         }
     }
@@ -932,7 +927,7 @@ successful_t ast_composite_find_exact_field(ast_composite_t *composite, const ch
 ast_polymorphic_composite_t *ast_polymorphic_composite_find_exact(ast_t *ast, const char *name){
     // TODO: Maybe sort and do a binary search or something
     for(length_t i = 0; i != ast->polymorphic_composites_length; i++){
-        if(strcmp(ast->polymorphic_composites[i].name, name) == 0){
+        if(streq(ast->polymorphic_composites[i].name, name)){
             return &ast->polymorphic_composites[i];
         }
     }
@@ -941,7 +936,7 @@ ast_polymorphic_composite_t *ast_polymorphic_composite_find_exact(ast_t *ast, co
 
 successful_t ast_enum_find_kind(ast_enum_t *ast_enum, const char *name, length_t *out_index){
     for(length_t i = 0; i != ast_enum->length; i++){
-        if(strcmp(ast_enum->kinds[i], name) == 0){
+        if(streq(ast_enum->kinds[i], name)){
             *out_index = i;
             return true;
         }

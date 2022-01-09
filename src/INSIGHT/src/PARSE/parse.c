@@ -1,22 +1,26 @@
 
-#include "UTIL/util.h"
-#include "UTIL/color.h"
-#include "UTIL/ground.h"
-#include "UTIL/filename.h"
+#include <stdbool.h>
+#include <stdlib.h>
+
+#include "AST/ast.h"
+#include "BRIDGE/any.h"
+#include "DRVR/compiler.h"
+#include "DRVR/object.h"
+#include "LEX/token.h"
 #include "PARSE/parse.h"
-#include "PARSE/parse_enum.h"
-#include "PARSE/parse_expr.h"
-#include "PARSE/parse_func.h"
-#include "PARSE/parse_meta.h"
-#include "PARSE/parse_type.h"
-#include "PARSE/parse_util.h"
 #include "PARSE/parse_alias.h"
+#include "PARSE/parse_ctx.h"
+#include "PARSE/parse_dependency.h"
+#include "PARSE/parse_enum.h"
+#include "PARSE/parse_func.h"
 #include "PARSE/parse_global.h"
+#include "PARSE/parse_meta.h"
+#include "PARSE/parse_namespace.h"
 #include "PARSE/parse_pragma.h"
 #include "PARSE/parse_struct.h"
-#include "PARSE/parse_namespace.h"
-#include "PARSE/parse_dependency.h"
-#include "BRIDGE/any.h"
+#include "PARSE/parse_util.h"
+#include "TOKEN/token_data.h"
+#include "UTIL/ground.h"
 
 errorcode_t parse(compiler_t *compiler, object_t *object){
     parse_ctx_t ctx;
@@ -112,7 +116,7 @@ errorcode_t parse_tokens(parse_ctx_t *ctx){
             } else if(ctx->composite_association != NULL){
                 ctx->composite_association = NULL;
             } else {
-                compiler_panicf(ctx->compiler, ctx->tokenlist->sources[*ctx->i], "Unexpected trailing closing brace '}'");
+                compiler_panicf(ctx->compiler, parse_ctx_peek_source(ctx), "Unexpected trailing closing brace '}'");
                 return FAILURE;
             }
             break;
@@ -126,7 +130,7 @@ errorcode_t parse_tokens(parse_ctx_t *ctx){
     }
 
     if(ctx->composite_association != NULL){
-        compiler_panicf(ctx->compiler, ctx->tokenlist->sources[*ctx->i], "Expected closing brace '}' for struct domain");
+        compiler_panicf(ctx->compiler, parse_ctx_peek_source(ctx), "Expected closing brace '}' for struct domain");
         return FAILURE;
     }
 

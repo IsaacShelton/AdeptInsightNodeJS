@@ -28,6 +28,11 @@ void string_builder_init(string_builder_t *builder);
 // Destroys a string builder and returns the finalized concatenated string
 strong_cstr_t string_builder_finalize(string_builder_t *builder);
 
+// ---------------- string_builder_finalize_with_length ----------------
+// Destroys a string builder and returns the finalized concatenated string
+// with length information attached
+strong_lenstr_t string_builder_finalize_with_length(string_builder_t *builder);
+
 // ---------------- string_builder_abandon ----------------
 // Destroys a string builder without returning the work-in-progress string
 void string_builder_abandon(string_builder_t *builder);
@@ -36,9 +41,17 @@ void string_builder_abandon(string_builder_t *builder);
 // Appends a string to the string being built by a string builder
 void string_builder_append(string_builder_t *builder, const char *portion);
 
-// ---------------- string_builder_append ----------------
+// ---------------- string_builder_append_view ----------------
 // Appends a string view to the string being built by a string builder
 void string_builder_append_view(string_builder_t *builder, const char *portion, length_t portion_length);
+
+// ---------------- string_builder_append_char ----------------
+// Appends a character to the string being built by a string builder
+void string_builder_append_char(string_builder_t *builder, char character);
+
+// ---------------- string_builder_append_int ----------------
+// Appends an int to the string being built by a string builder
+void string_builder_append_int(string_builder_t *builder, int integer);
 
 #ifdef __cplusplus
 }

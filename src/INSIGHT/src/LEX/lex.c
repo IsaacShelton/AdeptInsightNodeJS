@@ -1,10 +1,17 @@
 
 #include "LEX/lex.h"
-#include "LEX/pkg.h"
-#include "UTIL/util.h"
+
+#include <stdlib.h>
+#include <string.h>
+
+#include "LEX/token.h"
+#include "TOKEN/token_data.h"
 #include "UTIL/color.h"
-#include "UTIL/search.h"
+#include "UTIL/datatypes.h"
 #include "UTIL/filename.h"
+#include "UTIL/search.h"
+#include "UTIL/string.h"
+#include "UTIL/util.h"
 
 errorcode_t lex(compiler_t *compiler, object_t *object){
     if(!file_text_contents(object->filename, &object->buffer, &object->buffer_length, true)){
@@ -244,7 +251,7 @@ errorcode_t lex_buffer(compiler_t *compiler, object_t *object){
                 t = &((*tokens)[tokenlist->length]);
                 t->id = BEGINNING_OF_KEYWORD_TOKENS + (unsigned int) array_index; // Values 0x00000050..0x0000009F are reserved for keywords
                 t->data = NULL;
-            } else if(strcmp(lex_state.buildup, "elif") == 0){
+            } else if(streq(lex_state.buildup, "elif")){
                 // Is a shorthand keyword
                 t = &((*tokens)[tokenlist->length]);
                 t->id = TOKEN_ELSE;
@@ -298,9 +305,9 @@ errorcode_t lex_buffer(compiler_t *compiler, object_t *object){
                 case 'r': lex_state.buildup[lex_state.buildup_length++] = '\r';  break;
                 case 't': lex_state.buildup[lex_state.buildup_length++] = '\t';  break;
                 case 'b': lex_state.buildup[lex_state.buildup_length++] = '\b';  break;
-                case 'e': lex_state.buildup[lex_state.buildup_length++] = '\e';  break;
                 case '0': lex_state.buildup[lex_state.buildup_length++] = '\0';  break;
                 case '"': lex_state.buildup[lex_state.buildup_length++] = '"';   break;
+                case 'e': lex_state.buildup[lex_state.buildup_length++] = 0x1B;  break;
                 case '\'': lex_state.buildup[lex_state.buildup_length++] = '\''; break;
                 case '\\': lex_state.buildup[lex_state.buildup_length++] = '\\'; break;
                 default:
@@ -360,10 +367,10 @@ errorcode_t lex_buffer(compiler_t *compiler, object_t *object){
                 case 'r': lex_state.buildup[lex_state.buildup_length++] = '\r'; break;
                 case 't': lex_state.buildup[lex_state.buildup_length++] = '\t'; break;
                 case 'b': lex_state.buildup[lex_state.buildup_length++] = '\b'; break;
-                case 'e': lex_state.buildup[lex_state.buildup_length++] = '\e'; break;
                 case '0': lex_state.buildup[lex_state.buildup_length++] = '\0'; break;
                 case '\'': lex_state.buildup[lex_state.buildup_length++] = '\''; break;
                 case '\\': lex_state.buildup[lex_state.buildup_length++] = '\\'; break;
+                case 'e':  lex_state.buildup[lex_state.buildup_length++] = 0x1B; break;
                 default:
                     lex_get_location(buffer, i, &line, &column);
                     redprintf("%s:%d:%d: Unknown escape sequence '\\%c'\n", filename_name_const(object->filename), line, column, buffer[i]);

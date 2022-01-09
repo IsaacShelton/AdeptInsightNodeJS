@@ -1,7 +1,20 @@
 
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "AST/ast.h"
+#include "DRVR/compiler.h"
+#include "DRVR/object.h"
+#include "LEX/token.h"
 #include "PARSE/parse.h"
+#include "PARSE/parse_ctx.h"
 #include "PARSE/parse_dependency.h"
+#include "TOKEN/token_data.h"
 #include "UTIL/filename.h"
+#include "UTIL/ground.h"
+#include "UTIL/string.h"
 #include "UTIL/util.h"
 
 errorcode_t parse_import(parse_ctx_t *ctx){
@@ -10,7 +23,7 @@ errorcode_t parse_import(parse_ctx_t *ctx){
 
     // Don't allow importing while inside struct domains
     if(ctx->composite_association != NULL){
-        compiler_panicf(ctx->compiler, ctx->tokenlist->sources[*ctx->i], "Cannot import dependencies within struct domain");
+        compiler_panicf(ctx->compiler, parse_ctx_peek_source(ctx), "Cannot import dependencies within struct domain");
         return FAILURE;
     }
 
@@ -87,7 +100,7 @@ errorcode_t parse_foreign_library(parse_ctx_t *ctx){
     //    ^
 
     if(ctx->composite_association != NULL){
-        compiler_panicf(ctx->compiler, ctx->tokenlist->sources[*ctx->i], "Cannot declare foreign dependencies within struct domain");
+        compiler_panicf(ctx->compiler, parse_ctx_peek_source(ctx), "Cannot declare foreign dependencies within struct domain");
         return FAILURE;
     }
 
@@ -98,15 +111,16 @@ errorcode_t parse_foreign_library(parse_ctx_t *ctx){
     length_t *i = ctx->i;
     token_t *tokens = ctx->tokenlist->tokens;
 
+    // TODO: CLEANUP: This code isn't very straight forward
     if(tokens[*i + 1].id == TOKEN_WORD){
         const char *data = tokens[*i + 1].data;
 
-        if(strcmp(data, "framework") == 0){
+        if(streq(data, "framework")){
             kind = LIBRARY_KIND_FRAMEWORK;
 
             // Take ownership of library string
             tokens[*i].data = NULL;
-        } else if(strcmp(data, "library") == 0){
+        } else if(streq(data, "library")){
             kind = LIBRARY_KIND_LIBRARY;
 
             // Take ownership of library string
@@ -115,10 +129,10 @@ errorcode_t parse_foreign_library(parse_ctx_t *ctx){
             compiler_panicf(ctx->compiler, ctx->tokenlist->sources[*i + 1], "Unrecognized foreign library type '%s'", data);
         }
 
-        (*ctx->i)++;
+        *i += 1;
     }
 
-    // NOTE: 'library' become as strong_cstr_t
+    // NOTE: 'library' becomes a strong_cstr_t
     if(kind == LIBRARY_KIND_NONE) library = filename_local(ctx->object->filename, library);
     ast_add_foreign_library(ctx->ast, library, kind);
     return SUCCESS;
@@ -149,7 +163,7 @@ maybe_null_strong_cstr_t parse_standard_library_component(parse_ctx_t *ctx, sour
     if(first_part_of_component == NULL) return NULL;
 
     // Set base source
-    *out_source = ctx->tokenlist->sources[*ctx->i];
+    *out_source = parse_ctx_peek_source(ctx);
 
     while(ctx->tokenlist->tokens[*ctx->i + 1].id == TOKEN_DIVIDE){
         // Skip over previous component name
@@ -218,7 +232,7 @@ maybe_null_strong_cstr_t parse_resolve_import(parse_ctx_t *ctx, weak_cstr_t file
     char *absolute = filename_absolute(filename);
     if(absolute) return absolute;
 
-    compiler_panicf(ctx->compiler, ctx->tokenlist->sources[*ctx->i], "INTERNAL ERROR: Failed to get absolute path of filename '%s'", filename);
+    compiler_panicf(ctx->compiler, parse_ctx_peek_source(ctx), "INTERNAL ERROR: Failed to get absolute path of filename '%s'", filename);
     return NULL;
 }
 
@@ -227,7 +241,7 @@ bool already_imported(parse_ctx_t *ctx, weak_cstr_t filename){
     length_t objects_length = ctx->compiler->objects_length;
 
     for(length_t i = 0; i != objects_length; i++){
-        if(strcmp(objects[i]->full_filename, filename) == 0) return true;
+        if(streq(objects[i]->full_filename, filename)) return true;
     }
 
     return false;

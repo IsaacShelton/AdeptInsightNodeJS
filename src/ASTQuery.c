@@ -4,6 +4,7 @@
 #include "LEX/lex.h"
 #include "PARSE/parse.h"
 #include "UTIL/util.h"
+#include "UTIL/string.h"
 #include "DRVR/compiler.h"
 #include "UTIL/filename.h"
 #include "UTIL/__insight_undo_overloads.h"

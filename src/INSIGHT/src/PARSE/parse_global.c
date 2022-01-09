@@ -1,9 +1,21 @@
 
-#include "UTIL/util.h"
-#include "PARSE/parse.h"
+#include <stdbool.h>
+#include <stdlib.h>
+
+#include "AST/ast.h"
+#include "AST/ast_constant.h"
+#include "AST/ast_expr.h"
+#include "AST/ast_type.h"
+#include "DRVR/compiler.h"
+#include "LEX/token.h"
+#include "PARSE/parse_ctx.h"
 #include "PARSE/parse_expr.h"
-#include "PARSE/parse_type.h"
 #include "PARSE/parse_global.h"
+#include "PARSE/parse_type.h"
+#include "TOKEN/token_data.h"
+#include "UTIL/ground.h"
+#include "UTIL/trait.h"
+#include "UTIL/util.h"
 
 errorcode_t parse_global(parse_ctx_t *ctx){
     length_t *i = ctx->i;
@@ -115,8 +127,8 @@ errorcode_t parse_constant_definition(parse_ctx_t *ctx, ast_constant_t *out_cons
         return FAILURE;
     }
 
-    if(ctx->tokenlist->tokens[*ctx->i].id != TOKEN_NEWLINE){
-        compiler_panicf(ctx->compiler, ctx->tokenlist->sources[*ctx->i], "Expected end-of-line after constant definition");
+    if(parse_ctx_peek(ctx) != TOKEN_NEWLINE){
+        compiler_panicf(ctx->compiler, parse_ctx_peek_source(ctx), "Expected end-of-line after constant definition");
         ast_expr_free_fully(value);
         free(name);
         return FAILURE;
@@ -157,8 +169,8 @@ errorcode_t parse_old_style_constant_global(parse_ctx_t *ctx, strong_cstr_t name
     // Prepend namespace name
     parse_prepend_namespace(ctx, &name);
 
-    if(ctx->tokenlist->tokens[*ctx->i].id != TOKEN_NEWLINE){
-        compiler_panicf(ctx->compiler, ctx->tokenlist->sources[*ctx->i], "Expected end-of-line after constant expression definition");
+    if(parse_ctx_peek(ctx) != TOKEN_NEWLINE){
+        compiler_panicf(ctx->compiler, parse_ctx_peek_source(ctx), "Expected end-of-line after constant expression definition");
         ast_expr_free_fully(value);
         free(name);
         return FAILURE;
