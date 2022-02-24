@@ -217,7 +217,7 @@ failure:
         // Since we are using binary file stream mode, don't rely on fprintf
         time_t timestamp = time(NULL);
         char timestamp_buffer[256];
-        sprintf(timestamp_buffer, "%"PRIu64, (uint64_t) timestamp);
+        sprintf(timestamp_buffer, "%zu", (size_t) timestamp);
         fwrite(timestamp_buffer, 1, strlen(timestamp_buffer), f);
         
         fwrite(buffer.content + last_update.end, 1, buffer.capacity - last_update.end, f);
@@ -259,7 +259,8 @@ failure:
                     config->show_new_compiler_available
                 ){
                     blueprintf("\nNEWS: A newer version of Adept is available!\n");
-                    printf("    (Visit https://github.com/AdeptLanguage/Adept for more information)\n\n");
+                    printf("    Visit https://github.com/AdeptLanguage/Adept for more information!\n");
+                    printf("    You can disable update checks in your 'adept.config'\n\n");
                     goto success;
                 } else if(config->show_checking_for_updates_message){
                     blueprintf(" -> Already up to date!\n");

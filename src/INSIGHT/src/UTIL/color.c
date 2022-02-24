@@ -86,12 +86,17 @@ void internalwarningprintf(const char *format, ...){
     va_end(args);
 }
 
-noreturn void panic(const char *format, ...){
+noreturn void die(const char *format, ...){
     va_list args;
     va_start(args, format);
     redprintf("critical-error: ");
     vprintf(format, args);
     va_end(args);
     redprintf("    Exiting with status of -1\n");
-    exit(-1);
+
+    #if ENABLE_DEBUG_FEATURES
+        abort();
+    #else
+        exit(-1);
+    #endif
 }

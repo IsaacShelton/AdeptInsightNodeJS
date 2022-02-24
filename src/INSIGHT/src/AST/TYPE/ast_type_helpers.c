@@ -33,9 +33,7 @@ bool ast_type_has_polymorph(const ast_type_t *type){
             break;
         case AST_ELEM_FUNC: {
                 ast_elem_func_t *func_elem = (ast_elem_func_t*) type->elements[i];
-                for(length_t i = 0; i != func_elem->arity; i++){
-                    if(ast_type_has_polymorph(&func_elem->arg_types[i])) return true;
-                }
+                if(ast_type_list_has_polymorph(func_elem->arg_types, func_elem->arity)) return true;
                 if(ast_type_has_polymorph(func_elem->return_type)) return true;
             }
             break;
@@ -46,10 +44,7 @@ bool ast_type_has_polymorph(const ast_type_t *type){
         case AST_ELEM_GENERIC_BASE: {
                 ast_elem_generic_base_t *generic_base = (ast_elem_generic_base_t*) type->elements[i];
                 if(generic_base->name_is_polymorphic) return true;
-                
-                for(length_t i = 0; i != generic_base->generics_length; i++){
-                    if(ast_type_has_polymorph(&generic_base->generics[i])) return true;
-                }
+                if(ast_type_list_has_polymorph(generic_base->generics, generic_base->generics_length)) return true;
             }
             break;
         case AST_ELEM_LAYOUT: {
@@ -58,7 +53,7 @@ bool ast_type_has_polymorph(const ast_type_t *type){
             }
             break;
         default:
-            panic("ast_type_has_polymorph() - Unrecognized element ID 0x%08X\n", type->elements[i]->id);
+            die("ast_type_has_polymorph() - Unrecognized element ID 0x%08X\n", type->elements[i]->id);
         }
     }
     return false;
@@ -71,9 +66,9 @@ bool ast_type_list_has_polymorph(const ast_type_t *types, length_t length){
     return false;
 }
 
-ast_type_t ast_type_dereferenced_view(ast_type_t *pointer_type){
+ast_type_t ast_type_dereferenced_view(const ast_type_t *pointer_type){
     if(pointer_type->elements_length < 2 || pointer_type->elements[0]->id != AST_ELEM_POINTER){
-        panic("ast_type_dereferenced_view() - Cannot dereference non-pointer type\n");
+        die("ast_type_dereferenced_view() - Cannot dereference non-pointer type\n");
     }
 
     return (ast_type_t){
@@ -85,7 +80,7 @@ ast_type_t ast_type_dereferenced_view(ast_type_t *pointer_type){
 
 void ast_type_dereference(ast_type_t *inout_type){
     if(inout_type->elements_length < 2 || inout_type->elements[0]->id != AST_ELEM_POINTER){
-        panic("ast_type_dereference() - Cannot dereference non-pointer type\n");
+        die("ast_type_dereference() - Cannot dereference non-pointer type\n");
     }
 
     // Modify ast_type_t to remove a pointer element from the front
@@ -106,7 +101,7 @@ ast_type_t ast_type_unwrapped_view(ast_type_t *type){
 
 void ast_type_unwrap_fixed_array(ast_type_t *inout_type){
     if(inout_type->elements_length < 2 || inout_type->elements[0]->id != AST_ELEM_FIXED_ARRAY){
-        panic("ast_type_unwrap_fixed_array() - Cannot unwrap non-fixed-array type\n");
+        die("ast_type_unwrap_fixed_array() - Cannot unwrap non-fixed-array type\n");
     }
 
     // Modify ast_type_t to remove a fixed-array element from the front

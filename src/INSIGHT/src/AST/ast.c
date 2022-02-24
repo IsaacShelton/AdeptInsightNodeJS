@@ -54,9 +54,9 @@ void ast_init(ast_t *ast, unsigned int cross_compile_for){
     ast->meta_definitions = NULL;
     ast->meta_definitions_length = 0;
     ast->meta_definitions_capacity = 0;
-    ast->polymorphic_funcs = NULL;
-    ast->polymorphic_funcs_length = 0;
-    ast->polymorphic_funcs_capacity = 0;
+    ast->poly_funcs = NULL;
+    ast->poly_funcs_length = 0;
+    ast->poly_funcs_capacity = 0;
     ast->polymorphic_methods = NULL;
     ast->polymorphic_methods_length = 0;
     ast->polymorphic_methods_capacity = 0;
@@ -208,14 +208,14 @@ void ast_free(ast_t *ast){
     }
 
     free(ast->meta_definitions);
-    free(ast->polymorphic_funcs);
+    free(ast->poly_funcs);
     free(ast->polymorphic_methods);
 
     for(i = 0; i != ast->polymorphic_composites_length; i++){
         ast_polymorphic_composite_t *poly_composite = &ast->polymorphic_composites[i];
 
         ast_free_composites((ast_composite_t*) poly_composite, 1);
-        free_string_list(poly_composite->generics, poly_composite->generics_length);
+        free_strings(poly_composite->generics, poly_composite->generics_length);
     }
 
     free(ast->polymorphic_composites);
@@ -227,7 +227,7 @@ void ast_free_functions(ast_func_t *functions, length_t functions_length){
         free(func->name);
 
         if(func->arg_names){
-            free_string_list(func->arg_names, func->arity);
+            free_strings(func->arg_names, func->arity);
         }
 
         ast_types_free(func->arg_types, func->arity);
@@ -299,7 +299,7 @@ void ast_dump(ast_t *ast, const char *filename){
     length_t i;
 
     if(file == NULL){
-        panic("ast_dump() - Failed to open ast dump file\n");
+        die("ast_dump() - Failed to open ast dump file\n");
     }
 
     ast_dump_enums(file, ast->enums, ast->enums_length);
@@ -674,6 +674,15 @@ void ast_dump_statements(FILE *file, ast_expr_t **statements, length_t length, l
                 free(assembly);
             }
             break;
+        case EXPR_PREINCREMENT:
+        case EXPR_POSTINCREMENT:
+        case EXPR_PREDECREMENT:
+        case EXPR_POSTDECREMENT: {
+                strong_cstr_t expr_str = ast_expr_str(statements[s]);
+                fprintf(file, "%s\n", expr_str);
+                free(expr_str);
+            }
+            break;
         default:
             fprintf(file, "<unknown statement>\n");
         }
@@ -705,7 +714,7 @@ void ast_dump_composite(FILE *file, ast_composite_t *composite, length_t additio
         fprintf(file, "union ");
         break;
     default:
-        panic("ast_dump_composite() - Unrecognized layout kind %d\n", (int) layout->kind);
+        die("ast_dump_composite() - Unrecognized layout kind %d\n", (int) layout->kind);
     }
 
     // Dump generics "<$K, $V>" if the composite is polymorphic
@@ -779,7 +788,7 @@ void ast_dump_composite_subfields(FILE *file, ast_layout_skeleton_t *skeleton, a
             fprintf(file, ")\n");
             break;
         default:
-            panic("ast_dump_composite() - Unrecognized bone kind %d\n", (int) bone->kind);
+            die("ast_dump_composite() - Unrecognized bone kind %d\n", (int) bone->kind);
         }
     }
 
@@ -833,6 +842,25 @@ void ast_dump_enums(FILE *file, ast_enum_t *enums, length_t enums_length){
     }
 }
 
+bool ast_func_is_method(ast_func_t *func){
+    return func->arity > 0 && func->arg_names && streq(func->arg_names[0], "this") && !(func->traits & AST_FUNC_FOREIGN);
+}
+
+maybe_null_weak_cstr_t ast_method_get_subject_typename(ast_func_t *method){
+    // Assumes that 'ast_func_is_method(method)' is true
+
+    ast_type_t subject_view = ast_type_dereferenced_view(&method->arg_types[0]);
+    ast_elem_t *elem = subject_view.elements[0];
+
+    if(ast_type_is_base(&subject_view)){
+        return ((ast_elem_base_t*) elem)->base;
+    } else if(ast_type_is_generic_base(&subject_view)){
+        return ((ast_elem_generic_base_t*) elem)->name;
+    } else {
+        return NULL;
+    }
+}
+
 void ast_func_create_template(ast_func_t *func, const ast_func_head_t *options){
     func->name = options->name;
     func->arg_names = NULL;
@@ -854,7 +882,7 @@ void ast_func_create_template(ast_func_t *func, const ast_func_head_t *options){
     func->export_as = options->export_name;
 
     #if ADEPT_INSIGHT_BUILD
-    func->end_source = NULL_SOURCE;
+    func->end_source = options->source;
     #endif
 
     if(options->is_entry)                 func->traits |= AST_FUNC_MAIN;
@@ -1120,10 +1148,10 @@ int ast_enums_cmp(const void *a, const void *b){
     return strcmp(((ast_enum_t*) a)->name, ((ast_enum_t*) b)->name);
 }
 
-int ast_polymorphic_funcs_cmp(const void *a, const void *b){
-    int diff = strcmp(((ast_polymorphic_func_t*) a)->name, ((ast_polymorphic_func_t*) b)->name);
+int ast_poly_funcs_cmp(const void *a, const void *b){
+    int diff = strcmp(((ast_poly_func_t*) a)->name, ((ast_poly_func_t*) b)->name);
     if(diff != 0) return diff;
-    return (int) ((ast_polymorphic_func_t*) a)->ast_func_id - (int) ((ast_polymorphic_func_t*) b)->ast_func_id;
+    return (int) ((ast_poly_func_t*) a)->ast_func_id - (int) ((ast_poly_func_t*) b)->ast_func_id;
 }
 
 int ast_globals_cmp(const void *ga, const void *gb){

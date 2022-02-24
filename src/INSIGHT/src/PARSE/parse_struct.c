@@ -138,13 +138,13 @@ errorcode_t parse_composite_head(parse_ctx_t *ctx, bool is_union, strong_cstr_t 
             expand((void**) &generics, sizeof(strong_cstr_t), generics_length, &generics_capacity, 1, 4);
 
             if(parse_ignore_newlines(ctx, "Expected polymorphic generic type")){
-                free_string_list(generics, generics_length);
+                free_strings(generics, generics_length);
                 return FAILURE;
             }
 
             if(tokens[*i].id != TOKEN_POLYMORPH){
                 compiler_panic(ctx->compiler, ctx->tokenlist->sources[*i], "Expected polymorphic generic type");
-                free_string_list(generics, generics_length);
+                free_strings(generics, generics_length);
                 return FAILURE;
             }
 
@@ -152,19 +152,19 @@ errorcode_t parse_composite_head(parse_ctx_t *ctx, bool is_union, strong_cstr_t 
             *i += 1;
 
             if(parse_ignore_newlines(ctx, "Expected '>' or ',' after polymorphic generic type")){
-                free_string_list(generics, generics_length);
+                free_strings(generics, generics_length);
                 return FAILURE;
             }
 
             if(tokens[*i].id == TOKEN_NEXT){
                 if(tokens[++(*i)].id == TOKEN_GREATERTHAN){
                     compiler_panic(ctx->compiler, ctx->tokenlist->sources[*i], "Expected polymorphic generic type after ',' in generics list");
-                    free_string_list(generics, generics_length);
+                    free_strings(generics, generics_length);
                     return FAILURE;
                 }
             } else if(tokens[*i].id != TOKEN_GREATERTHAN){
                 compiler_panic(ctx->compiler, ctx->tokenlist->sources[*i], "Expected ',' after polymorphic generic type");
-                free_string_list(generics, generics_length);
+                free_strings(generics, generics_length);
                 return FAILURE;
             }
         }
@@ -179,7 +179,7 @@ errorcode_t parse_composite_head(parse_ctx_t *ctx, bool is_union, strong_cstr_t 
         *out_name = parse_take_word(ctx, "Expected structure name after 'struct' keyword");
 
         if(*out_name == NULL){
-            free_string_list(generics, generics_length);
+            free_strings(generics, generics_length);
             return FAILURE;
         }
     }
@@ -533,10 +533,10 @@ errorcode_t parse_create_record_constructor(parse_ctx_t *ctx, weak_cstr_t name, 
 
     // Add function to polymorphic function registry if it's polymorphic
     if(is_polymorphic){
-        expand((void**) &ast->polymorphic_funcs, sizeof(ast_polymorphic_func_t), ast->polymorphic_funcs_length, &ast->polymorphic_funcs_capacity, 1, 4);
+        expand((void**) &ast->poly_funcs, sizeof(ast_poly_func_t), ast->poly_funcs_length, &ast->poly_funcs_capacity, 1, 4);
 
         func->traits |= AST_FUNC_POLYMORPHIC;
-        ast_polymorphic_func_t *poly_func = &ast->polymorphic_funcs[ast->polymorphic_funcs_length++];
+        ast_poly_func_t *poly_func = &ast->poly_funcs[ast->poly_funcs_length++];
         poly_func->name = func->name;
         poly_func->ast_func_id = ast_func_id;
         poly_func->is_beginning_of_group = -1; // Uncalculated

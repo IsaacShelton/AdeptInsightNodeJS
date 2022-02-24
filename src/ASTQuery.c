@@ -67,7 +67,7 @@ void build_ast(json_builder_t *builder, compiler_t *compiler, object_t *object){
     json_build_object_key(builder, "functions");
     json_build_array_start(builder);
 
-    bool has_some_functions = ast->funcs_length || ast->polymorphic_funcs_length;
+    bool has_some_functions = ast->funcs_length || ast->poly_funcs_length;
 
     for(length_t i = 0; i < ast->funcs_length; i++){
         add_function_definition(builder, compiler, &ast->funcs[i]);

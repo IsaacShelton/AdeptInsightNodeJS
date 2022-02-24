@@ -26,15 +26,16 @@ extern "C" {
 
 #define ADEPT_PACKAGE_MANAGER_SPEC_VERSION 1
 
-#include <stdio.h>
 #include <assert.h>
-#include <stdlib.h>
-#include <string.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #ifdef _WIN32
 #include <io.h>
+
 #define access _access
 #define F_OK 0
 #else
@@ -80,7 +81,8 @@ typedef struct {
 
 // ---------------- funcid_t ----------------
 // Used as an ID to refer to functions
-#define MAX_FUNCID 0xFFFFFFFF
+#define MAX_FUNCID      0xFFFFFFFE
+#define INVALID_FUNC_ID 0xFFFFFFFF
 typedef uint32_t funcid_t;
 
 // ---------------- maybe_index_t ----------------
@@ -89,6 +91,10 @@ typedef long long maybe_index_t;
 // ---------------- troolean ----------------
 // 3-state value
 typedef unsigned char troolean;
+
+#define TROOLEAN_TRUE 1
+#define TROOLEAN_FALSE 0
+#define TROOLEAN_UNKNOWN 2
 
 // ---------------- optional ----------------
 #define optional(TYPE) struct { bool has; TYPE value; }
@@ -100,9 +106,21 @@ typedef struct {
     length_t length;
 } lenstr_t, strong_lenstr_t, weak_lenstr_t;
 
-#define TROOLEAN_TRUE 1
-#define TROOLEAN_FALSE 0
-#define TROOLEAN_UNKNOWN 2
+inline bool lenstreq(lenstr_t a, lenstr_t b){
+    return a.length == b.length && memcmp(a.cstr, b.cstr, a.length) == 0;
+}
+
+inline int lenstrcmp(lenstr_t a, lenstr_t b){
+    if(a.length == b.length){
+        return memcmp(a.cstr, b.cstr, a.length);
+    } else {
+        return (a.length < b.length) ? 1 : -1;
+    }
+}
+
+inline lenstr_t cstr_to_lenstr(char *cstr){
+    return (lenstr_t){ .cstr = cstr, .length = strlen(cstr) };
+}
 
 // ---------------- SOURCE_IS_NULL ----------------
 // Whether or not a 'source_t' is NULL_SOURCE
@@ -118,7 +136,14 @@ typedef struct {
 // ---------------- streq ----------------
 // Returns whether two null-termianted strings are equal
 // Equivalent to 'strcmp(STRING, VALUE) == 0)'
-#define streq(STRING, VALUE) (strcmp(STRING, VALUE) == 0)
+#define streq(STRING, VALUE) (strcmp((STRING), (VALUE)) == 0)
+
+// ---------------- bsearch_insertion ----------------
+// Like bsearch, except will return the last checked pivot (or NULL)
+void *bsearch_insertion(const void *key, const void *base, size_t num, size_t size, int (*cmp)(const void *, const void*));
+
+// ---------------- NUM_ITEMS ----------------
+#define NUM_ITEMS(array) (sizeof (array) / sizeof *(array))
 
 // ---------------- special characters ----------------
 #ifdef __APPLE__

@@ -16,9 +16,9 @@ strong_cstr_t strclone(const char *src);
 // Clones a strong string list
 strong_cstr_t *strsclone(strong_cstr_t *list, length_t length);
 
-// ---------------- free_string_list ----------------
+// ---------------- free_strings ----------------
 // Frees every string in a list, and then the list
-void free_string_list(strong_cstr_t *list, length_t length);
+void free_strings(strong_cstr_t *list, length_t length);
 
 // ---------------- strong_cstr_empty_if_null ----------------
 // Will heap-allocate an empty string in place of 'string'
@@ -28,7 +28,7 @@ strong_cstr_t strong_cstr_empty_if_null(strong_cstr_t string);
 // ---------------- string_to_escaped_string ----------------
 // Escapes the contents of a modern string so that
 // special characters such as \n are transfromed into \\n
-// and surrounds the string with double quotes
+// and surrounds the string with 'escaped_quote' if not '\0'.
 // NOTE: 'escaped_quote' may be 0x00 to signify no surrounding quote character
 strong_cstr_t string_to_escaped_string(char *array, length_t length, char escaped_quote);
 

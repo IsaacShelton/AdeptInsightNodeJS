@@ -21,6 +21,10 @@ extern "C" {
 #endif
 // ----------------------------------------------------------
 
+// ---------------- memclone ----------------
+// Clones a section of memory
+void *memclone(void *memory, length_t bytes);
+
 // ---------------- expand ----------------
 // Expands an array if it won't be able hold new elements
 void expand(void **inout_memory, length_t unit_size, length_t length, length_t *inout_capacity,
@@ -50,7 +54,7 @@ strong_cstr_t mallocandsprintf(const char *format, ...);
 
 // ---------------- find_insert_position ----------------
 // Finds the position to insert an object into an object list
-length_t find_insert_position(void *array, length_t length, int(*compare)(const void*, const void*), void *object_reference, length_t object_size);
+length_t find_insert_position(const void *items, length_t length, int (*compare)(const void*, const void*), const void *object, length_t size);
 
 // ---------------- file_exists ----------------
 // Returns whether a file exits

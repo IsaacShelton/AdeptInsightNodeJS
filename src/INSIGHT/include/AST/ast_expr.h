@@ -358,6 +358,13 @@ typedef struct {
     // Aliases
     ast_expr_ifelse_t, ast_expr_unlesselse_t, ast_expr_ifwhileelse_t, ast_expr_unlessuntilelse_t;
 
+// ---------------- ast_expr_conditionless_blocK_t ----------------
+// A conditionless block
+typedef struct {
+    DERIVE_AST_EXPR;
+    ast_expr_list_t statements;
+} ast_expr_conditionless_block_t;
+
 // ---------------- ast_expr_each_in_t ----------------
 // Expression for 'each in' loop. Used for iterating
 // over a low-level array given a length.
@@ -592,7 +599,7 @@ void ast_expr_list_free(ast_expr_list_t *list);
 
 // ---------------- ast_expr_list_append ----------------
 // Appends an expression to an ast_expr_list_t
-#define ast_expr_list_append(LIST, VALUE) list_append(LIST, VALUE, ast_expr_t*)
+#define ast_expr_list_append(LIST, VALUE) list_append((LIST), (VALUE), ast_expr_t*)
 
 // ---------------- ast_expr_list_clone ----------------
 // Deep-clones an AST expression list

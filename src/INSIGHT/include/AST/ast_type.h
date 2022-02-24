@@ -108,11 +108,15 @@ typedef struct {
 
 // ---------------- ast_elem_polymorph_t ----------------
 // Type element for a polymorphic type variable
+#define DERIVE_ELEM_POLYMORPH struct { \
+    unsigned int id; \
+    source_t source; \
+    strong_cstr_t name; \
+    bool allow_auto_conversion; \
+}
+
 typedef struct {
-    unsigned int id;
-    source_t source;
-    strong_cstr_t name;
-    bool allow_auto_conversion;
+    DERIVE_ELEM_POLYMORPH;
 } ast_elem_polymorph_t;
 
 // ---------------- ast_elem_polycount_t ----------------
@@ -126,13 +130,10 @@ typedef struct {
 // ---------------- ast_elem_polymorph_prereq_t ----------------
 // Type element for a polymorphic type variable which only fits
 // for structs that match the similarity prerequisite
-// NOTE: Must overlap with 'ast_elem_polymorph_t'
+// NOTE: Guaranteed to overlap with 'ast_elem_polymorph_t'
 typedef struct {
-    unsigned int id;
-    source_t source;
-    strong_cstr_t name;
-    bool allow_auto_conversion;
-    // ----------------------------
+    DERIVE_ELEM_POLYMORPH;
+
     strong_cstr_t similarity_prerequisite;
 } ast_elem_polymorph_prereq_t;
 
@@ -250,6 +251,11 @@ bool ast_type_is_polymorph(const ast_type_t *type);
 // Returns whether an AST type is a pointer to a plain polymorphic type
 bool ast_type_is_polymorph_ptr(const ast_type_t *type);
 
+// ---------------- ast_type_is_polymorph_like_ptr ----------------
+// Returns whether an AST type is a pointer to a plain polymorphic type
+// or a polymorphic prerequisite type
+bool ast_type_is_polymorph_like_ptr(const ast_type_t *type);
+
 // ---------------- ast_type_is_generic_base ----------------
 // Returns whether an AST type is a plain generic base type
 bool ast_type_is_generic_base(const ast_type_t *type);
@@ -276,7 +282,7 @@ bool ast_type_list_has_polymorph(const ast_type_t *types, length_t length);
 
 // ---------------- ast_type_dereferenced_view ----------------
 // Creates a temporary view of a pointer type as if it had been dereferenced
-ast_type_t ast_type_dereferenced_view(ast_type_t *pointer_type);
+ast_type_t ast_type_dereferenced_view(const ast_type_t *pointer_type);
 
 // ---------------- ast_type_dereference ----------------
 // Removes the first pointer element of a pointer type

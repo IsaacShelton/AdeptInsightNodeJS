@@ -5,6 +5,7 @@
 
 #include "AST/ast.h"
 #include "AST/ast_layout.h"
+#include "AST/ast_type.h"
 #include "UTIL/color.h"
 
 static bool ast_elem_base_identical(ast_elem_t *raw_a, ast_elem_t *raw_b){
@@ -52,7 +53,7 @@ static bool ast_elem_generic_base_identical(ast_elem_t *raw_a, ast_elem_t *raw_b
     ast_elem_generic_base_t *b = (ast_elem_generic_base_t*) raw_b;
 
     if(a->name_is_polymorphic || b->name_is_polymorphic){
-        panic("ast_types_identical() - Polymorphic names feature for generic structs is unimplemented\n");
+        die("ast_types_identical() - Polymorphic names feature for generic structs is unimplemented\n");
     }
 
     if(a->generics_length != b->generics_length) return false;
@@ -142,7 +143,7 @@ bool ast_types_identical(const ast_type_t *a, const ast_type_t *b){
             printf("    Assuming they are different...\n");
             return false;
         default:
-            panic("ast_types_identical() - Unrecognized element ID %d\n", (int) a_elem->id);
+            die("ast_types_identical() - Unrecognized element ID %d\n", (int) a_elem->id);
         }
     }
 
@@ -154,4 +155,20 @@ bool ast_type_lists_identical(const ast_type_t *a, const ast_type_t *b, length_t
         if(!ast_types_identical(&a[i], &b[i])) return false;
     }
     return true;
+}
+
+bool ast_elem_identical(ast_elem_t *a, ast_elem_t *b){
+    ast_type_t type_a = (ast_type_t){
+        .elements = &a,
+        .elements_length = 1,
+        .source = a->source,
+    };
+
+    ast_type_t type_b = (ast_type_t){
+        .elements = &b,
+        .elements_length = 1,
+        .source = b->source,
+    };
+
+    return ast_types_identical(&type_a, &type_b);
 }

@@ -13,6 +13,10 @@
 #include "UTIL/ground.h"
 #include "UTIL/util.h"
 
+void *memclone(void *memory, length_t bytes){
+    return memcpy(malloc(bytes), memory, bytes);
+}
+
 void expand(void **inout_memory, length_t unit_size, length_t length, length_t *inout_capacity, length_t amount, length_t default_capacity){
     // Expands an array in memory to be able to fit more units
 
@@ -98,6 +102,7 @@ char *mallocandsprintf(const char *format, ...){
                 size += strlen(va_arg(transverse, char*));
                 break;
             case 'd':
+                va_arg(transverse, int);
                 size += 16; // 16 characters should be enough to hold int under all circumstances
                 break;
             default:
@@ -113,13 +118,13 @@ char *mallocandsprintf(const char *format, ...){
     return destination;
 }
 
-length_t find_insert_position(void *array, length_t length, int(*compare)(const void*, const void*), void *object_reference, length_t object_size){
+length_t find_insert_position(const void *items, length_t length, int (*compare)(const void*, const void*), const void *object, length_t size){
     maybe_index_t first, middle, last, comparison;
     first = 0; last = length - 1;
 
     while(first <= last){
         middle = (first + last) / 2;
-        comparison = compare((char*) array + (middle * object_size), object_reference);
+        comparison = (*compare)((char*) items + (middle * size), object);
         
         if(comparison == 0) return middle;
         else if(comparison > 0) last = middle - 1;
