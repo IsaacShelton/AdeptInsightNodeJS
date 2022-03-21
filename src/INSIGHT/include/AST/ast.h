@@ -79,6 +79,7 @@ typedef struct {
 #define AST_FUNC_IMPLICIT    TRAIT_B
 #define AST_FUNC_WINMAIN     TRAIT_C
 #define AST_FUNC_NO_DISCARD  TRAIT_D
+#define AST_FUNC_DISALLOW    TRAIT_E
 
 // Additional AST function traits for builtin uses
 #define AST_FUNC_WARN_BAD_PRINTF_FORMAT TRAIT_2_1
@@ -300,9 +301,9 @@ strong_cstr_t ast_func_head_str(ast_func_t *func);
 // Fills out a blank template for a new function
 void ast_func_create_template(ast_func_t *func, const ast_func_head_t *options);
 
-// ---------------- ast_func_is_polymorphic ----------------
-// Returns whether an AST function has polymorphic arguments
-bool ast_func_is_polymorphic(ast_func_t *func);
+// ---------------- ast_func_has_polymorphic_signature ----------------
+// Returns whether an AST function has polymorphic arguments or return type
+bool ast_func_has_polymorphic_signature(ast_func_t *func);
 
 // ---------------- ast_composite_init ----------------
 // Initializes an AST composite
@@ -353,6 +354,12 @@ maybe_index_t ast_find_enum(ast_enum_t *enums, length_t enums_length, const char
 // Finds a global variable by name
 // NOTE: Requires that 'globals' is sorted
 maybe_index_t ast_find_global(ast_global_t *globals, length_t globals_length, weak_cstr_t name);
+
+// ---------------- ast_func_end_is_reachable ----------------
+// Checks whether its possible to execute every statement in a function
+// and still have not returned
+bool ast_func_end_is_reachable(ast_t *ast, funcid_t ast_func_id);
+bool ast_func_end_is_reachable_inner(ast_expr_list_t *stmts, unsigned int max_depth, unsigned int depth);
 
 // ---------------- ast_add_alias ----------------
 // Adds a type alias to the global scope of an AST

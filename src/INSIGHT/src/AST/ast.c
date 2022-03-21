@@ -386,20 +386,20 @@ strong_cstr_t ast_func_head_str(ast_func_t *func){
     strong_cstr_t args_string = ast_func_args_str(func);
     strong_cstr_t return_type_string = ast_type_str(&func->return_type);
     weak_cstr_t no_discard = func->traits & AST_FUNC_NO_DISCARD ? " exhaustive" : "";
+    weak_cstr_t disallow = func->traits & AST_FUNC_DISALLOW ? " = delete" : "";
 
     strong_cstr_t result;
 
     if(func->traits & AST_FUNC_FOREIGN){
-        result = mallocandsprintf("foreign %s(%s)%s %s", func->name, args_string ? args_string : "", no_discard, return_type_string);
+        result = mallocandsprintf("foreign %s(%s)%s %s%s", func->name, args_string ? args_string : "", no_discard, return_type_string, disallow);
     } else {
-        result = mallocandsprintf("func %s(%s)%s %s", func->name, args_string ? args_string : "", no_discard, return_type_string);
+        result = mallocandsprintf("func %s(%s)%s %s%s", func->name, args_string ? args_string : "", no_discard, return_type_string, disallow);
     }
 
     free(args_string);
     free(return_type_string);
     return result;
 }
-
 
 void ast_dump_statement_list(FILE *file, ast_expr_list_t *statements, length_t indentation){
     ast_dump_statements(file, statements->statements, statements->length, indentation);
@@ -817,14 +817,14 @@ void ast_dump_composite_subfields(FILE *file, ast_layout_skeleton_t *skeleton, a
 void ast_dump_globals(FILE *file, ast_global_t *globals, length_t globals_length){
     for(length_t i = 0; i != globals_length; i++){
         ast_global_t *global = &globals[i];
-        char *global_typename = ast_type_str(&global->type);
+        strong_cstr_t global_typename = ast_type_str(&global->type);
 
         if(global->initial == NULL){
             fprintf(file, "%s %s\n", global->name, global_typename);
         } else {
-            char *value = ast_expr_str(global->initial);
-            fprintf(file, "%s %s = %s\n", global->name, global_typename, value);
-            free(value);
+            strong_cstr_t initial_value = ast_expr_str(global->initial);
+            fprintf(file, "%s %s = %s\n", global->name, global_typename, initial_value);
+            free(initial_value);
         }
 
         free(global_typename);
@@ -854,7 +854,6 @@ void ast_dump_enums(FILE *file, ast_enum_t *enums, length_t enums_length){
                 kinds_string_length += 2;
             }
         }
-
 
         fprintf(file, "%s (%s)\n", enum_definition->name, kinds_string ? kinds_string : "");
         free(kinds_string);
@@ -896,7 +895,7 @@ void ast_func_create_template(ast_func_t *func, const ast_func_head_t *options){
     func->traits = TRAIT_NONE;
     func->variadic_arg_name = NULL;
     func->variadic_source = NULL_SOURCE;
-    memset(&func->statements, 0, sizeof(ast_expr_list_t));
+    func->statements = (ast_expr_list_t){0};
     func->source = options->source;
     func->export_as = options->export_name;
 
@@ -917,12 +916,9 @@ void ast_func_create_template(ast_func_t *func, const ast_func_head_t *options){
     }
 }
 
-bool ast_func_is_polymorphic(ast_func_t *func){
-    for(length_t i = 0; i != func->arity; i++){
-        if(ast_type_has_polymorph(&func->arg_types[i])) return true;
-    }
-    if(ast_type_has_polymorph(&func->return_type)) return true;
-    return false;
+bool ast_func_has_polymorphic_signature(ast_func_t *func){
+    return ast_type_list_has_polymorph(func->arg_types, func->arity)
+        || ast_type_has_polymorph(&func->return_type);
 }
 
 void ast_composite_init(ast_composite_t *composite, strong_cstr_t name, ast_layout_t layout, source_t source){
@@ -1066,6 +1062,35 @@ maybe_index_t ast_find_global(ast_global_t *globals, length_t globals_length, we
     }
 
     return -1;
+}
+
+bool ast_func_end_is_reachable_inner(ast_expr_list_t *stmts, unsigned int max_depth, unsigned int depth){
+    if (depth >= max_depth) return true;
+
+    for(length_t i = 0; i < stmts->length; i++){
+        ast_expr_t *stmt = stmts->statements[i];
+        switch(stmt->id){
+        case EXPR_IFELSE:
+        case EXPR_UNLESSELSE: {
+            ast_expr_conditional_else_t *conditional = (ast_expr_conditional_else_t*) stmt;
+
+            if(!ast_func_end_is_reachable_inner(&conditional->statements, max_depth, depth + 1)
+            && !ast_func_end_is_reachable_inner(&conditional->else_statements, max_depth, depth + 1)){
+                return false;
+            }
+            break;
+        }
+        case EXPR_RETURN:
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+bool ast_func_end_is_reachable(ast_t *ast, funcid_t ast_func_id){
+    // Ensure that the reference we're working with isn't one that was previously invalidated
+    return ast_func_end_is_reachable_inner(&ast->funcs[ast_func_id].statements, 20, 0);
 }
 
 void ast_add_alias(ast_t *ast, strong_cstr_t name, ast_type_t strong_type, trait_t traits, source_t source){
