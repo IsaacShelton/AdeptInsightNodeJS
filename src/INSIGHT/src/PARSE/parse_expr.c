@@ -368,69 +368,21 @@ errorcode_t parse_expr_post(parse_ctx_t *ctx, ast_expr_t **inout_expr){
                     // value.method(arg1, arg2, ...)
                     //              ^
 
-                    ast_expr_t *arg_expr;
-                    length_t args_capacity = 0;
-
-                    // Ignore newline termination within children expressions
+                    // Ignore newline termination in expression parsing
                     ctx->ignore_newlines_in_expr_depth++;
 
-                    while(tokens[*i].id != TOKEN_CLOSE){
-                        if(parse_ignore_newlines(ctx, "Expected method argument")){
-                            ctx->ignore_newlines_in_expr_depth--;
-                            ast_exprs_free_fully(call_expr->args, call_expr->arity);
-                            free(call_expr->name);
-                            free(call_expr);
-                            return FAILURE;
-                        }
-
-                        if(parse_expr(ctx, &arg_expr)){
-                            ctx->ignore_newlines_in_expr_depth--;
-                            ast_exprs_free_fully(call_expr->args, call_expr->arity);
-                            free(call_expr->name);
-                            free(call_expr);
-                            return FAILURE;
-                        }
-
-                        // Allocate room for more arguments if necessary
-                        if(call_expr->arity == args_capacity){
-                            if(args_capacity == 0){
-                                call_expr->args = malloc(sizeof(ast_expr_t*) * 4);
-                                args_capacity = 4;
-                            } else {
-                                args_capacity *= 2;
-                                ast_expr_t **new_args = malloc(sizeof(ast_expr_t*) * args_capacity);
-                                memcpy(new_args, call_expr->args, sizeof(ast_expr_t*) * call_expr->arity);
-                                free(call_expr->args);
-                                call_expr->args = new_args;
-                            }
-                        }
-
-                        call_expr->args[call_expr->arity++] = arg_expr;
-                        if(parse_ignore_newlines(ctx, "Expected ',' or ')' after expression")){
-                            ctx->ignore_newlines_in_expr_depth--;
-                            ast_exprs_free_fully(call_expr->args, call_expr->arity);
-                            free(call_expr->name);
-                            free(call_expr);
-                            return FAILURE;
-                        }
-
-                        if(tokens[*i].id == TOKEN_NEXT) (*i)++;
-                        else if(tokens[*i].id != TOKEN_CLOSE){
-                            ctx->ignore_newlines_in_expr_depth--;
-                            compiler_panic(ctx->compiler, sources[*i], "Expected ',' or ')' after expression");
-                            ast_exprs_free_fully(call_expr->args, call_expr->arity);
-                            free(call_expr->name);
-                            free(call_expr);
-                            return FAILURE;
-                        }
+                    if(parse_expr_arguments(ctx, &call_expr->args, &call_expr->arity, NULL)){
+                        ctx->ignore_newlines_in_expr_depth--;
+                        free(call_expr->name);
+                        free(call_expr);
+                        return FAILURE;
                     }
 
-                    if(tokens[++(*i)].id == TOKEN_GIVES){
-                        // Skip over '~>'
-                        (*i)++;
+                    // Un-Ignore newline termination in expression parsing
+                    ctx->ignore_newlines_in_expr_depth--;
 
+                    if(parse_eat(ctx, TOKEN_GIVES, NULL) == SUCCESS){
                         if(parse_type(ctx, &call_expr->gives)){
-                            ctx->ignore_newlines_in_expr_depth--;
                             ast_exprs_free_fully(call_expr->args, call_expr->arity);
                             free(call_expr->name);
                             free(call_expr);
@@ -440,7 +392,6 @@ errorcode_t parse_expr_post(parse_ctx_t *ctx, ast_expr_t **inout_expr){
                         memset(&call_expr->gives, 0, sizeof(ast_type_t));
                     }
 
-                    ctx->ignore_newlines_in_expr_depth--;
                     *inout_expr = (ast_expr_t*) call_expr;
                 } else {
                     if(is_tentative){
@@ -539,10 +490,10 @@ static tokenid_t parse_expr_has_terminating_token(tokenid_t id){
     case TOKEN_BIT_AND_ASSIGN:
     case TOKEN_BIT_OR_ASSIGN:
     case TOKEN_BIT_XOR_ASSIGN:
-    case TOKEN_BIT_LS_ASSIGN:
-    case TOKEN_BIT_RS_ASSIGN:
-    case TOKEN_BIT_LGC_LS_ASSIGN:
-    case TOKEN_BIT_LGC_RS_ASSIGN:
+    case TOKEN_BIT_LSHIFT_ASSIGN:
+    case TOKEN_BIT_RSHIFT_ASSIGN:
+    case TOKEN_BIT_LGC_LSHIFT_ASSIGN:
+    case TOKEN_BIT_LGC_RSHIFT_ASSIGN:
     case TOKEN_TERMINATE_JOIN:
     case TOKEN_COLON:
     case TOKEN_BREAK:
@@ -777,72 +728,41 @@ errorcode_t parse_expr_word(parse_ctx_t *ctx, ast_expr_t **out_expr){
 errorcode_t parse_expr_call(parse_ctx_t *ctx, ast_expr_t **out_expr, bool allow_tentative){
     // NOTE: Assumes name and open token
 
-    length_t *i = ctx->i;
-    token_t *tokens = ctx->tokenlist->tokens;
-    source_t *sources = ctx->tokenlist->sources;
-    source_t source = sources[*i];
+    source_t source = ctx->tokenlist->sources[*ctx->i];
 
-    // Steal callee name
-    strong_cstr_t name = parse_ctx_peek_data_take(ctx);
-
-    length_t arity = 0;
-    ast_expr_t **args = NULL;
-
-    ast_expr_t *arg;
-    length_t max_arity = 0;
-
-    // Determine whether call is tentative, assume that '(' token follows
-    bool is_tentative;
-    (*i)++;
+    strong_cstr_t name = parse_take_word(ctx, "Expected function name");
+    if(name == NULL) return FAILURE;
 
     if(parse_ignore_newlines(ctx, "Unexpected statement termination")){
         free(name);
         return FAILURE;
     }
 
-    if(tokens[(*i)++].id == TOKEN_MAYBE){
-        is_tentative = true;
-        (*i)++;
-    } else {
-        is_tentative = false;
+    // Determine whether call is tentative
+    bool is_tentative = parse_eat(ctx, TOKEN_MAYBE, NULL) == SUCCESS;
+
+    if(parse_eat(ctx, TOKEN_OPEN, "Expected '(' after function name for function call")){
+        free(name);
+        return FAILURE;
     }
 
-    // Ignore newline termination within children expressions
+    // Ignore newline termination in expression parsing
     ctx->ignore_newlines_in_expr_depth++;
 
-    while(tokens[*i].id != TOKEN_CLOSE){
-        if(parse_ignore_newlines(ctx, "Expected function argument") || parse_expr(ctx, &arg)){
-            ctx->ignore_newlines_in_expr_depth--;
-            ast_exprs_free_fully(args, arity);
-            free(name);
-            return FAILURE;
-        }
+    ast_expr_t **args;
+    length_t arity, max_arity;
 
-        // Allocate room for more arguments if necessary
-        expand((void**) &args, sizeof(ast_expr_t*), arity, &max_arity, 1, 4);
-        args[arity++] = arg;
-        
-        if(parse_ignore_newlines(ctx, "Expected ',' or ')' after expression")){
-            ctx->ignore_newlines_in_expr_depth--;
-            ast_exprs_free_fully(args, arity);
-            free(name);
-            return FAILURE;
-        }
-
-        if(tokens[*i].id == TOKEN_NEXT){
-            (*i)++;
-        } else if(tokens[*i].id != TOKEN_CLOSE){
-            compiler_panic(ctx->compiler, sources[*i], "Expected ',' or ')' after expression");
-            ctx->ignore_newlines_in_expr_depth--;
-            ast_exprs_free_fully(args, arity);
-            free(name);
-            return FAILURE;
-        }
+    if(parse_expr_arguments(ctx, &args, &arity, &max_arity)){
+        ctx->ignore_newlines_in_expr_depth--;
+        free(name);
+        return FAILURE;
     }
+
+    // Un-ignore newline termination in expression parsing
+    ctx->ignore_newlines_in_expr_depth--;
 
     if(is_tentative && !allow_tentative){
         compiler_panic(ctx->compiler, source, "Tentative calls cannot be used in expressions");
-        ctx->ignore_newlines_in_expr_depth--;
         ast_exprs_free_fully(args, arity);
         free(name);
         return FAILURE;
@@ -850,12 +770,8 @@ errorcode_t parse_expr_call(parse_ctx_t *ctx, ast_expr_t **out_expr, bool allow_
 
     ast_type_t gives;
 
-    if(tokens[++(*i)].id == TOKEN_GIVES){
-        // Skip over '~>'
-        (*i)++;
-
+    if(parse_eat(ctx, TOKEN_GIVES, NULL) == SUCCESS){
         if(parse_type(ctx, &gives)){
-            ctx->ignore_newlines_in_expr_depth--;
             ast_exprs_free_fully(args, arity);
             free(name);
             return FAILURE;
@@ -864,9 +780,52 @@ errorcode_t parse_expr_call(parse_ctx_t *ctx, ast_expr_t **out_expr, bool allow_
         memset(&gives, 0, sizeof(ast_type_t));
     }
 
-    ctx->ignore_newlines_in_expr_depth--;
     ast_expr_create_call(out_expr, name, arity, args, is_tentative, &gives, source);
     return SUCCESS;
+}
+
+errorcode_t parse_expr_arguments(parse_ctx_t *ctx, ast_expr_t ***out_args, length_t *out_arity, length_t *out_capacity){
+    // (arg1, arg2, arg3)
+    //  ^
+
+    token_t *tokens = ctx->tokenlist->tokens;
+    length_t *i = ctx->i;
+
+    ast_expr_list_t args;
+    ast_expr_list_init(&args, 0);
+
+    while(tokens[*i].id != TOKEN_CLOSE){
+        ast_expr_t *arg_expr;
+
+        if(parse_ignore_newlines(ctx, "Expected argument") || parse_expr(ctx, &arg_expr)){
+            goto failure;
+        }
+
+        ast_expr_list_append(&args, arg_expr);
+
+        if(parse_ignore_newlines(ctx, "Expected ',' or ')' after expression")){
+            goto failure;
+        }
+
+        if(tokens[*i].id == TOKEN_NEXT){
+            (*i)++;
+        } else if(tokens[*i].id != TOKEN_CLOSE){
+            compiler_panic(ctx->compiler, ctx->tokenlist->sources[*i], "Expected ',' or ')' after expression");
+            goto failure;
+        }
+    }
+
+    // Skip over closing ')' token
+    (*i)++;
+
+    *out_args = args.statements;
+    *out_arity = args.length;
+    if(out_capacity != NULL) *out_capacity = args.capacity;
+    return SUCCESS;
+
+failure:
+    ast_expr_list_free(&args);
+    return FAILURE;
 }
 
 errorcode_t parse_expr_enum_value(parse_ctx_t *ctx, ast_expr_t **out_expr){
@@ -1144,48 +1103,69 @@ errorcode_t parse_expr_new(parse_ctx_t *ctx, ast_expr_t **out_expr){
     // NOTE: Assumes current token is 'new' keyword
 
     length_t *i = ctx->i;
-    token_t *tokens = ctx->tokenlist->tokens;
-    source_t *sources = ctx->tokenlist->sources;
+    source_t source = ctx->tokenlist->sources[*i];
 
-    if(tokens[*i + 1].id == TOKEN_CSTRING){
+    // Skip over 'new' keyword
+    *i += 1;
+
+    if(parse_ctx_peek(ctx) == TOKEN_CSTRING){
         // This is actually an 'ast_expr_new_cstring_t' expression,
         // instead of a 'ast_expr_new_t' expression
 
         ast_expr_new_cstring_t *new_cstring_expr = malloc(sizeof(ast_expr_new_cstring_t));
-        new_cstring_expr->id = EXPR_NEW_CSTRING;
-        new_cstring_expr->source = sources[(*i)++];
-        new_cstring_expr->value = (char*) tokens[(*i)++].data;
+
+        *new_cstring_expr = (ast_expr_new_cstring_t){
+            .id = EXPR_NEW_CSTRING,
+            .source = source,
+            .value = (char*) parse_ctx_peek_data(ctx),
+        };
+
+        *i += 1;
         *out_expr = (ast_expr_t*) new_cstring_expr;
         return SUCCESS;
     }
 
     ast_expr_new_t *new_expr = malloc(sizeof(ast_expr_new_t));
-    new_expr->id = EXPR_NEW;
-    new_expr->amount = NULL;
-    new_expr->is_undef = false;
-    new_expr->source = sources[*i];
-    if(tokens[++*i].id == TOKEN_UNDEF){
+
+    *new_expr = (ast_expr_new_t){
+        .id = EXPR_NEW,
+        .type = (ast_type_t){0},
+        .amount = NULL,
+        .is_undef = false,
+        .source = source,
+        .inputs = (optional_ast_expr_list_t){0},
+    };
+
+    if(parse_eat(ctx, TOKEN_UNDEF, NULL) == SUCCESS){
         new_expr->is_undef = true;
-        (*i)++;
     }
 
     if(parse_type(ctx, &new_expr->type)){
-        free(new_expr);
-        return FAILURE;
+        goto failure;
     }
 
-    if(tokens[*i].id == TOKEN_MULTIPLY){
-        (*i)++;
-        
+    if(parse_eat(ctx, TOKEN_OPEN, NULL) == SUCCESS){
+        ast_expr_list_t *list = &new_expr->inputs.value;
+
+        if(parse_expr_arguments(ctx, &list->expressions, &list->length, &list->capacity)){
+            goto failure;
+        }
+
+        new_expr->inputs.has = true;
+    }
+
+    if(parse_eat(ctx, TOKEN_MULTIPLY, NULL) == SUCCESS){
         if(parse_primary_expr(ctx, &new_expr->amount)){
-            ast_type_free(&new_expr->type);
-            free(new_expr);
-            return FAILURE;
+            goto failure;
         }
     }
 
     *out_expr = (ast_expr_t*) new_expr;
     return SUCCESS;
+
+failure:
+    ast_expr_free_fully((ast_expr_t*) new_expr);
+    return FAILURE;
 }
 
 errorcode_t parse_expr_static(parse_ctx_t *ctx, ast_expr_t **out_expr){
@@ -1272,14 +1252,13 @@ errorcode_t parse_expr_def(parse_ctx_t *ctx, ast_expr_t **out_expr){
     trait_t traits = TRAIT_NONE;
 
     unsigned int expr_id = (tokens[*i].id == TOKEN_UNDEF ? EXPR_ILDECLAREUNDEF : EXPR_ILDECLARE);
-    source_t source = sources[(*i)++];;
+    source_t source = sources[(*i)++];
 
     maybe_null_weak_cstr_t name = parse_eat_word(ctx, "Expected variable name for inline declaration");
     if(name == NULL) return FAILURE;
 
-    if(tokens[*i].id == TOKEN_POD){
+    if(parse_eat(ctx, TOKEN_POD, NULL) == SUCCESS){
         traits |= AST_EXPR_DECLARATION_POD;
-        (*i)++;
     }
 
     ast_type_t type;
@@ -1305,7 +1284,7 @@ errorcode_t parse_expr_def(parse_ctx_t *ctx, ast_expr_t **out_expr){
         }
     }
 
-    ast_expr_create_declaration(out_expr, expr_id, source, name, type, traits, value);
+    ast_expr_create_declaration(out_expr, expr_id, source, name, type, traits, value, NO_AST_EXPR_LIST);
     return SUCCESS;
 }
 

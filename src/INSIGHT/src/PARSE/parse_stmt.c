@@ -884,6 +884,7 @@ errorcode_t parse_stmt_mid_declare(parse_ctx_t *ctx, ast_expr_list_t *stmt_list,
 
     unsigned int declare_stmt_type = EXPR_DECLARE;
     ast_expr_t *initial_value = NULL;
+    optional_ast_expr_list_t inputs = {0};
 
     // Handle initial value assignment
     if(parse_eat(ctx, TOKEN_ASSIGN, NULL) == SUCCESS){
@@ -901,6 +902,12 @@ errorcode_t parse_stmt_mid_declare(parse_ctx_t *ctx, ast_expr_list_t *stmt_list,
                 goto failure;
             }
         }
+    } else if(parse_eat(ctx, TOKEN_OPEN, NULL) == SUCCESS){
+        if(parse_expr_arguments(ctx, &inputs.value.statements, &inputs.value.length, &inputs.value.capacity)){
+            return FAILURE;
+        }
+
+        inputs.has = true;
     }
 
     // Create variable declarations
@@ -914,7 +921,7 @@ errorcode_t parse_stmt_mid_declare(parse_ctx_t *ctx, ast_expr_list_t *stmt_list,
             expand((void**) &stmt_list->statements, sizeof(ast_expr_t*), stmt_list->length, &stmt_list->capacity, 1, 8);
         }
 
-        ast_expr_create_declaration(&stmt_list->statements[stmt_list->length++], declare_stmt_type, source_list[i], names[i], type, traits, value);
+        ast_expr_create_declaration(&stmt_list->statements[stmt_list->length++], declare_stmt_type, source_list[i], names[i], type, traits, value, inputs);
     }
 
     return SUCCESS;
@@ -1320,8 +1327,8 @@ errorcode_t parse_mid_mutable_expr_operation(parse_ctx_t *ctx, ast_expr_list_t *
     case TOKEN_SUBTRACT_ASSIGN: case TOKEN_MULTIPLY_ASSIGN:
     case TOKEN_DIVIDE_ASSIGN: case TOKEN_MODULUS_ASSIGN:
     case TOKEN_BIT_AND_ASSIGN: case TOKEN_BIT_OR_ASSIGN: case TOKEN_BIT_XOR_ASSIGN:
-    case TOKEN_BIT_LS_ASSIGN: case TOKEN_BIT_RS_ASSIGN:
-    case TOKEN_BIT_LGC_LS_ASSIGN: case TOKEN_BIT_LGC_RS_ASSIGN:
+    case TOKEN_BIT_LSHIFT_ASSIGN: case TOKEN_BIT_RSHIFT_ASSIGN:
+    case TOKEN_BIT_LGC_LSHIFT_ASSIGN: case TOKEN_BIT_LGC_RSHIFT_ASSIGN:
         break;
     default:
         compiler_panic(ctx->compiler, sources[(*i) - 1], "Expected assignment operator after expression");
@@ -1349,19 +1356,19 @@ errorcode_t parse_mid_mutable_expr_operation(parse_ctx_t *ctx, ast_expr_list_t *
 
     unsigned int stmt_id;
     switch(id){
-    case TOKEN_ASSIGN:            stmt_id = EXPR_ASSIGN;          break;
-    case TOKEN_ADD_ASSIGN:        stmt_id = EXPR_ADD_ASSIGN;      break;
-    case TOKEN_SUBTRACT_ASSIGN:   stmt_id = EXPR_SUBTRACT_ASSIGN; break;
-    case TOKEN_MULTIPLY_ASSIGN:   stmt_id = EXPR_MULTIPLY_ASSIGN; break;
-    case TOKEN_DIVIDE_ASSIGN:     stmt_id = EXPR_DIVIDE_ASSIGN;   break;
-    case TOKEN_MODULUS_ASSIGN:    stmt_id = EXPR_MODULUS_ASSIGN;  break;
-    case TOKEN_BIT_AND_ASSIGN:    stmt_id = EXPR_AND_ASSIGN;      break;
-    case TOKEN_BIT_OR_ASSIGN:     stmt_id = EXPR_OR_ASSIGN;       break;
-    case TOKEN_BIT_XOR_ASSIGN:    stmt_id = EXPR_XOR_ASSIGN;      break;
-    case TOKEN_BIT_LS_ASSIGN:     stmt_id = EXPR_LS_ASSIGN;       break;
-    case TOKEN_BIT_RS_ASSIGN:     stmt_id = EXPR_RS_ASSIGN;       break;
-    case TOKEN_BIT_LGC_LS_ASSIGN: stmt_id = EXPR_LGC_LS_ASSIGN;   break;
-    case TOKEN_BIT_LGC_RS_ASSIGN: stmt_id = EXPR_LGC_RS_ASSIGN;   break;
+    case TOKEN_ASSIGN:                stmt_id = EXPR_ASSIGN;          break;
+    case TOKEN_ADD_ASSIGN:            stmt_id = EXPR_ADD_ASSIGN;      break;
+    case TOKEN_SUBTRACT_ASSIGN:       stmt_id = EXPR_SUBTRACT_ASSIGN; break;
+    case TOKEN_MULTIPLY_ASSIGN:       stmt_id = EXPR_MULTIPLY_ASSIGN; break;
+    case TOKEN_DIVIDE_ASSIGN:         stmt_id = EXPR_DIVIDE_ASSIGN;   break;
+    case TOKEN_MODULUS_ASSIGN:        stmt_id = EXPR_MODULUS_ASSIGN;  break;
+    case TOKEN_BIT_AND_ASSIGN:        stmt_id = EXPR_AND_ASSIGN;      break;
+    case TOKEN_BIT_OR_ASSIGN:         stmt_id = EXPR_OR_ASSIGN;       break;
+    case TOKEN_BIT_XOR_ASSIGN:        stmt_id = EXPR_XOR_ASSIGN;      break;
+    case TOKEN_BIT_LSHIFT_ASSIGN:     stmt_id = EXPR_LSHIFT_ASSIGN;       break;
+    case TOKEN_BIT_RSHIFT_ASSIGN:     stmt_id = EXPR_RSHIFT_ASSIGN;       break;
+    case TOKEN_BIT_LGC_LSHIFT_ASSIGN: stmt_id = EXPR_LGC_LSHIFT_ASSIGN;   break;
+    case TOKEN_BIT_LGC_RSHIFT_ASSIGN: stmt_id = EXPR_LGC_RSHIFT_ASSIGN;   break;
     default:
         compiler_panic(ctx->compiler, sources[*i], "INTERNAL ERROR: parse_stmts() came across unknown assignment operator");
         ast_expr_free_fully(mutable_expr);

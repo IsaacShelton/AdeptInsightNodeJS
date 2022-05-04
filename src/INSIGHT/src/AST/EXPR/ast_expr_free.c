@@ -97,6 +97,10 @@ static void ast_expr_func_addr_free(ast_expr_func_addr_t *expr){
 static void ast_expr_new_free(ast_expr_new_t *expr){
     ast_type_free(&expr->type);
     ast_expr_free_fully(expr->amount);
+
+    if(expr->inputs.has){
+        ast_exprs_free_fully(expr->inputs.value.expressions, expr->inputs.value.length);
+    }
 }
 
 static void ast_expr_static_data_free(ast_expr_static_data_t *expr){
@@ -118,6 +122,10 @@ static void ast_expr_return_free(ast_expr_return_t *expr){
 static void ast_expr_declare_free(ast_expr_declare_t *expr){
     ast_type_free(&expr->type);
     ast_expr_free_fully(expr->value);
+
+    if(expr->inputs.has){
+        ast_expr_list_free(&expr->inputs.value);
+    }
 }
 
 static void ast_expr_assign_free(ast_expr_assign_t *expr){
@@ -290,10 +298,10 @@ void ast_expr_free(ast_expr_t *expr){
     case EXPR_AND_ASSIGN:
     case EXPR_OR_ASSIGN:
     case EXPR_XOR_ASSIGN:
-    case EXPR_LS_ASSIGN:
-    case EXPR_RS_ASSIGN:
-    case EXPR_LGC_LS_ASSIGN:
-    case EXPR_LGC_RS_ASSIGN:
+    case EXPR_LSHIFT_ASSIGN:
+    case EXPR_RSHIFT_ASSIGN:
+    case EXPR_LGC_LSHIFT_ASSIGN:
+    case EXPR_LGC_RSHIFT_ASSIGN:
         ast_expr_assign_free((ast_expr_assign_t*) expr);
         break;
     case EXPR_IF:
