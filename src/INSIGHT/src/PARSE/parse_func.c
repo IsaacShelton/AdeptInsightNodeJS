@@ -22,6 +22,82 @@
 #include "UTIL/trait.h"
 #include "UTIL/util.h"
 
+static errorcode_t add_dispatcher(parse_ctx_t *ctx, func_id_t virtual_ast_func_id){
+    // TODO: This function is still a work in progress!
+    // It will be responsible for creating dispatcher functions that will
+    // handle the actual virtual dispatch for virtual methods.
+    // The default/overrides of these will not be accessible with normal calls,
+    // and will only be accessible when we look for them during vtable generation
+    // (special flags will be used to ensure only the right ones get found for the right searches)
+    // The dispatchers will by the user-facing function that actually gets called
+    // by the programmer
+    // In code, they would look something like this:
+    //
+    // func dispatcher(this *$This extends SubjectType, arg1 ArgType1, argn ArgTypeN) ReturnType {
+    //     return (*(this.__vtable__ as **ptr))[secret_vtable_entry_index](arg1, argn)
+    // }
+    //
+    // variadic virtual methods will eventually need special consideration,
+    // old-style vararg virtual methods will probably need to be forbidden.
+
+    ast_t *ast = ctx->ast;
+    func_id_t ast_func_id = ast_new_func(ast);
+    ast_func_t *func = &ast->funcs[ast_func_id];
+    ast_func_t *virtual = &ast->funcs[virtual_ast_func_id];
+
+    length_t arity = virtual->arity;
+
+    ast_func_head_t func_head = (ast_func_head_t){
+        .name = strclone(virtual->name),
+        .source = virtual->source,
+        .is_foreign = false,
+        .is_entry = false,
+        .prefixes = (ast_func_prefixes_t){0},
+        .export_name = NULL,
+    };
+
+    ast_func_create_template(func, &func_head);
+
+    func->traits |= AST_FUNC_DISPATCHER | AST_FUNC_GENERATED | AST_FUNC_POLYMORPHIC;
+    func->arity = arity;
+
+    func->arg_names = strsclone(virtual->arg_names, arity);
+    func->arg_types = ast_types_clone(virtual->arg_types, arity);
+    func->arg_sources = memclone(virtual->arg_sources, sizeof(source_t) * arity);
+    func->arg_flows = memclone(virtual->arg_flows, sizeof(char) * arity);
+    func->arg_type_traits = memclone(virtual->arg_type_traits, sizeof(trait_t) * arity);
+    func->return_type = ast_type_clone(&virtual->return_type);
+
+    // Ensure subject type is at the very least a pointer to a base or generic base
+    if(!ast_type_is_pointer_to_base_like(&func->arg_types[0])){
+        strong_cstr_t typename = ast_type_str(&func->arg_types[0]);
+        compiler_panicf(ctx->compiler, func->arg_types[0].source, "Cannot define virtual methods for non-class type '%s'", typename);
+        free(typename);
+        return FAILURE;
+    }
+
+    // Change subject type to be a polymorphic parameter that requires a match to extend the original subject class
+    // e.g. from
+    //   `*Shape`
+    // to
+    //   `*$This extends Shape`
+
+    ast_type_dereference(&func->arg_types[0]);
+    func->arg_types[0] = ast_type_pointer_to(ast_type_make_polymorph_prereq(strclone("This"), false, NULL, func->arg_types[0]));
+
+    // TODO: We still need to generate the implementation of the function
+    {
+        compiler_warnf(ctx->compiler, func->source, "Feature is not fully implemented yet");
+    }
+
+    // Remember default implementation to use for virtual dispatcher
+    func->virtual_source = virtual_ast_func_id;
+
+    // Register as polymorphic function
+    ast_add_poly_func(ast, func->name, ast_func_id);
+    return SUCCESS;
+}
+
 errorcode_t parse_func(parse_ctx_t *ctx){
     ast_t *ast = ctx->ast;
     token_t *tokens = ctx->tokenlist->tokens;
@@ -32,7 +108,7 @@ errorcode_t parse_func(parse_ctx_t *ctx){
         return parse_func_alias(ctx);
     }
 
-    if(ctx->ast->funcs_length >= MAX_FUNCID){
+    if(ctx->ast->funcs_length >= MAX_FUNC_ID){
         compiler_panic(ctx->compiler, source, "Maximum number of AST functions reached\n");
         return FAILURE;
     }
@@ -41,10 +117,9 @@ errorcode_t parse_func(parse_ctx_t *ctx){
     ast_func_head_parse_info_t func_head_parse_info;
     if(parse_func_head(ctx, &func_head, &func_head_parse_info)) return FAILURE;
 
-    expand((void**) &ast->funcs, sizeof(ast_func_t), ast->funcs_length, &ast->funcs_capacity, 1, 4);
+    func_id_t ast_func_id = ast_new_func(ast);
+    ast_func_t *func = &ast->funcs[ast_func_id];
 
-    funcid_t ast_func_id = (funcid_t) ast->funcs_length;
-    ast_func_t *func = &ast->funcs[ast->funcs_length++];
     ast_func_create_template(func, &func_head);
 
     if(func_head.is_foreign && ctx->composite_association != NULL){
@@ -67,7 +142,7 @@ errorcode_t parse_func(parse_ctx_t *ctx){
     tokenid_t beginning_token_id = tokens[*ctx->i].id;
 
     if(!func_head.is_foreign && (beginning_token_id == TOKEN_BEGIN || beginning_token_id == TOKEN_ASSIGN)){
-        ast_type_make_base(&func->return_type, strclone("void"));
+        func->return_type = ast_type_make_base(strclone("void"));
     } else {
         if(parse_type(ctx, &func->return_type)){
             func->return_type = (ast_type_t){0};
@@ -80,6 +155,18 @@ errorcode_t parse_func(parse_ctx_t *ctx){
     && ctx->tokenlist->tokens[*ctx->i + 1].id == TOKEN_DELETE){
         func->traits |= AST_FUNC_DISALLOW;
         *(ctx->i) += 2;
+    }
+
+    if(func_head_parse_info.is_constructor){
+        assert(ctx->composite_association);
+        
+        // Remember that the associated composite has a constructor
+        ctx->composite_association->has_constructor = true;
+
+        // Remember if this function is a constructor of a class
+        if(ctx->composite_association->is_class){
+            func->traits |= AST_FUNC_CLASS_CONSTRUCTOR;
+        }
     }
 
     if(validate_func_requirements(ctx, func, source)){
@@ -95,12 +182,7 @@ errorcode_t parse_func(parse_ctx_t *ctx){
 
         // Remember the function as polymorphic
         func->traits |= AST_FUNC_POLYMORPHIC;
-        expand((void**) &ast->poly_funcs, sizeof(ast_poly_func_t), ast->poly_funcs_length, &ast->poly_funcs_capacity, 1, 4);
-
-        ast_poly_func_t *poly_func = &ast->poly_funcs[ast->poly_funcs_length++];
-        poly_func->name = func->name;
-        poly_func->ast_func_id = ast_func_id;
-        poly_func->is_beginning_of_group = -1; // Uncalculated
+        ast_add_poly_func(ast, func->name, ast_func_id);
 
         if(func->arity != 0 && streq(func->arg_names[0], "this")){
             expand((void**) &ast->polymorphic_methods, sizeof(ast_poly_func_t), ast->polymorphic_methods_length, &ast->polymorphic_methods_capacity, 1, 4);
@@ -109,6 +191,15 @@ errorcode_t parse_func(parse_ctx_t *ctx){
             poly_method->ast_func_id = ast_func_id;
             poly_method->is_beginning_of_group = -1; // Uncalculated
         }
+    }
+
+    if(func->traits & AST_FUNC_VIRTUAL){
+        if(!ast_func_is_method(func)){
+            compiler_panicf(ctx->compiler, func->source, "Cannot mark non-method as 'virtual'");
+            return FAILURE;
+        }
+
+        if(add_dispatcher(ctx, ast_func_id)) return FAILURE;
     }
 
     if(parse_func_body(ctx, func)) return FAILURE;
@@ -138,14 +229,21 @@ void parse_func_solidify_constructor(ast_t *ast, ast_func_t *constructor, source
             .is_verbatim = false,
             .is_implicit = false,
             .is_external = false,
+            .is_virtual = false,
+            .is_override = false,
         },
         .export_name = NULL
     };
 
-    expand((void**) &ast->funcs, sizeof(ast_func_t), ast->funcs_length, &ast->funcs_capacity, 1, 4);
+    func_id_t ast_func_id = ast_new_func(ast);
+    ast_func_t *func = &ast->funcs[ast_func_id];
 
-    ast_func_t *func = &ast->funcs[ast->funcs_length++];
     ast_func_create_template(func, &func_head);
+
+    if(ast_func_has_polymorphic_signature(constructor)) {
+        func->traits |= AST_FUNC_POLYMORPHIC;
+        ast_add_poly_func(ast, func->name, ast_func_id);
+    }
 
     length_t arity = constructor->arity - 1;
 
@@ -153,10 +251,16 @@ void parse_func_solidify_constructor(ast_t *ast, ast_func_t *constructor, source
     func->arg_types = ast_types_clone(&constructor->arg_types[1], arity);
     func->arg_sources = memclone(&constructor->arg_sources[1], sizeof(source_t) * arity);
     func->arg_flows = memclone(&constructor->arg_flows[1], sizeof(char) * arity);
-    func->arg_type_traits = memclone(&constructor->arg_type_traits[1], sizeof(trait_t) * arity);
-
+    func->arg_type_traits = malloc(sizeof(trait_t) * arity);
+    
     if(constructor->arg_defaults){
-        func->arg_defaults = memclone(&constructor->arg_defaults[1], sizeof(ast_expr_t*) * arity);
+        func->arg_defaults = malloc(sizeof(ast_expr_t*) * arity);
+
+        for(length_t i = 0; i != arity; i++){
+            ast_expr_t *default_value = constructor->arg_defaults[1 + i];
+
+            func->arg_defaults[i] = default_value ? ast_expr_clone(default_value) : NULL;
+        }
     } else {
         func->arg_defaults = NULL;
     }
@@ -179,6 +283,7 @@ void parse_func_solidify_constructor(ast_t *ast, ast_func_t *constructor, source
 
     for(length_t i = 0; i != arity; i++){
         ast_expr_create_variable(&inputs.value.expressions[i], func->arg_names[i], NULL_SOURCE);
+        func->arg_type_traits[i] = AST_FUNC_ARG_TYPE_TRAIT_POD;
     }
 
     ast_expr_t *declare_and_construct_stmt;
@@ -236,7 +341,7 @@ errorcode_t parse_func_head(parse_ctx_t *ctx, ast_func_head_t *out_head, ast_fun
 
     if(ctx->composite_association == NULL){
         if(is_constructor){
-            compiler_panic(ctx->compiler, source, "Constructor must be defined inside the domain of a structure");
+            compiler_panic(ctx->compiler, source, "Constructor must be defined inside the domain of a class/structure");
             return FAILURE;
         } else {
             parse_prepend_namespace(ctx, &name);
@@ -347,31 +452,28 @@ errorcode_t parse_func_arguments(parse_ctx_t *ctx, ast_func_t *func){
         if(ctx->composite_association->is_polymorphic){
             // Insert 'this *<$A, $B, $C, ...> AssociatedStruct' as first argument to function
 
-            ast_elem_pointer_t *pointer = malloc(sizeof(ast_elem_pointer_t));
-            pointer->id = AST_ELEM_POINTER;
-            pointer->source = NULL_SOURCE;
+            ast_type_t *generics = malloc(sizeof(ast_type_t) * ctx->composite_association->generics_length);
+            length_t generics_length = ctx->composite_association->generics_length;
 
-            ast_elem_generic_base_t *generic_base = malloc(sizeof(ast_elem_generic_base_t));
-            generic_base->id = AST_ELEM_GENERIC_BASE;
-            generic_base->source = NULL_SOURCE;
-            generic_base->name = strclone(ctx->composite_association->name);
-            generic_base->generics = malloc(sizeof(ast_type_t) * ctx->composite_association->generics_length);
-
-            for(length_t i = 0; i != ctx->composite_association->generics_length; i++){
-                ast_type_make_polymorph(&generic_base->generics[i], strclone(ctx->composite_association->generics[i]), false);
+            for(length_t i = 0; i != generics_length; i++){
+                generics[i] = ast_type_make_polymorph(strclone(ctx->composite_association->generics[i]), false);
             }
 
-            generic_base->generics_length = ctx->composite_association->generics_length;
-            generic_base->name_is_polymorphic = false;
-    
-            func->arg_types[0].elements = malloc(sizeof(ast_elem_t*) * 2);
-            func->arg_types[0].elements[0] = (ast_elem_t*) pointer;
-            func->arg_types[0].elements[1] = (ast_elem_t*) generic_base;
-            func->arg_types[0].elements_length = 2;
-            func->arg_types[0].source = NULL_SOURCE;
+            ast_elem_t *pointer = ast_elem_pointer_make(NULL_SOURCE);
+            ast_elem_t *generic_base = ast_elem_generic_base_make(strclone(ctx->composite_association->name), NULL_SOURCE, generics, generics_length);
+
+            ast_elem_t **elements = malloc(sizeof(ast_elem_t*) * 2);
+            elements[0] = pointer;
+            elements[1] = generic_base;
+
+            func->arg_types[0] = (ast_type_t){
+                .elements = elements,
+                .elements_length = 2,
+                .source = NULL_SOURCE,
+            };
         } else {
-            // Insert 'this *AssociatedStruct' as first argument to function
-            ast_type_make_base_ptr(&func->arg_types[0], strclone(ctx->composite_association->name));
+            // Insert pointer type of 'this' as first argument to function
+            func->arg_types[0] = ast_type_make_base_ptr(strclone(ctx->composite_association->name));
         }
 
         func->arg_names[0] = strclone("this");
@@ -680,6 +782,8 @@ void parse_func_prefixes(parse_ctx_t *ctx, ast_func_prefixes_t *out_prefixes){
         case TOKEN_VERBATIM: out_prefixes->is_verbatim = true; break;
         case TOKEN_IMPLICIT: out_prefixes->is_implicit = true; break;
         case TOKEN_EXTERNAL: out_prefixes->is_external = true; break;
+        case TOKEN_VIRTUAL:  out_prefixes->is_virtual = true; break;
+        case TOKEN_OVERRIDE: out_prefixes->is_override = true; break;
         default: return;
         }
 
@@ -738,7 +842,7 @@ errorcode_t parse_func_alias(parse_ctx_t *ctx){
         return FAILURE;
     }
     
-    if(ast->func_aliases_length >= MAX_FUNCID){
+    if(ast->func_aliases_length >= MAX_FUNC_ID){
         compiler_panic(ctx->compiler, source, "Maximum number of AST function aliases reached\n");
         return FAILURE;
     }

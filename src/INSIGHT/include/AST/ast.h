@@ -24,6 +24,7 @@ extern "C" {
 #include "UTIL/color.h"
 #include "UTIL/ground.h"
 #include "UTIL/trait.h"
+#include "UTIL/index_id_list.h"
 
 struct compiler;
 
@@ -45,6 +46,7 @@ typedef struct {
     ast_expr_list_t statements;
     source_t source;
     maybe_null_strong_cstr_t export_as;
+    func_id_t virtual_source; // can be INVALID_FUNC_ID
 
     #ifdef ADEPT_INSIGHT_BUILD
     source_t end_source;
@@ -66,23 +68,25 @@ typedef struct {
 #define AST_FUNC_ARG_TYPE_TRAIT_POD TRAIT_1
 
 // Possible AST function traits
-#define AST_FUNC_FOREIGN     TRAIT_1
-#define AST_FUNC_VARARG      TRAIT_2
-#define AST_FUNC_MAIN        TRAIT_3
-#define AST_FUNC_STDCALL     TRAIT_4
-#define AST_FUNC_POLYMORPHIC TRAIT_5
-#define AST_FUNC_GENERATED   TRAIT_6
-#define AST_FUNC_DEFER       TRAIT_7
-#define AST_FUNC_PASS        TRAIT_8
-#define AST_FUNC_AUTOGEN     TRAIT_9
-#define AST_FUNC_VARIADIC    TRAIT_A
-#define AST_FUNC_IMPLICIT    TRAIT_B
-#define AST_FUNC_WINMAIN     TRAIT_C
-#define AST_FUNC_NO_DISCARD  TRAIT_D
-#define AST_FUNC_DISALLOW    TRAIT_E
-
-// Additional AST function traits for builtin uses
-#define AST_FUNC_WARN_BAD_PRINTF_FORMAT TRAIT_2_1
+#define AST_FUNC_FOREIGN                TRAIT_1
+#define AST_FUNC_VARARG                 TRAIT_2
+#define AST_FUNC_MAIN                   TRAIT_3
+#define AST_FUNC_STDCALL                TRAIT_4
+#define AST_FUNC_POLYMORPHIC            TRAIT_5
+#define AST_FUNC_GENERATED              TRAIT_6
+#define AST_FUNC_DEFER                  TRAIT_7
+#define AST_FUNC_PASS                   TRAIT_8
+#define AST_FUNC_AUTOGEN                TRAIT_9
+#define AST_FUNC_VARIADIC               TRAIT_A
+#define AST_FUNC_IMPLICIT               TRAIT_B
+#define AST_FUNC_WINMAIN                TRAIT_C
+#define AST_FUNC_NO_DISCARD             TRAIT_D
+#define AST_FUNC_DISALLOW               TRAIT_E
+#define AST_FUNC_VIRTUAL                TRAIT_F
+#define AST_FUNC_OVERRIDE               TRAIT_G
+#define AST_FUNC_DISPATCHER             TRAIT_2_1
+#define AST_FUNC_CLASS_CONSTRUCTOR      TRAIT_2_2
+#define AST_FUNC_WARN_BAD_PRINTF_FORMAT TRAIT_2_3
 
 // ------------------ ast_func_prefixes_t ------------------
 // Information about the keywords that prefix a function
@@ -90,7 +94,9 @@ typedef struct {
     bool is_stdcall  : 1,
          is_verbatim : 1,
          is_implicit : 1,
-         is_external : 1;
+         is_external : 1,
+         is_virtual  : 1,
+         is_override : 1;
 } ast_func_prefixes_t;
 
 // ------------------ ast_func_head_t ------------------
@@ -104,31 +110,33 @@ typedef struct {
     maybe_null_strong_cstr_t export_name;
 } ast_func_head_t;
 
+// ---------------- DERIVE_AST_COMPOSITE ----------------
+// Common fields for all ast_composite_*_t derivatives
+#define DERIVE_AST_COMPOSITE struct { \
+    strong_cstr_t name; \
+    ast_layout_t layout; \
+    source_t source; \
+    ast_type_t parent; \
+    bool is_polymorphic : 1; \
+    bool is_class : 1; \
+    bool has_constructor : 1;\
+}
+
 // ---------------- ast_composite_t ----------------
 // A structure/union within the root AST
 typedef struct {
-    strong_cstr_t name;
-    ast_layout_t layout;
-    source_t source;
-    bool is_polymorphic;
+    DERIVE_AST_COMPOSITE;
 } ast_composite_t;
 
-// Possible AST structure traits
-#define AST_STRUCT_POLYMORPHIC  TRAIT_1
-#define AST_UNION_POLYMORPHIC   AST_STRUCT_POLYMORPHIC
-
-// ---------------- ast_polymorphic_composite_t ----------------
+// ---------------- ast_poly_composite_t ----------------
 // A polymorphic composite
-// NOTE: Guaranteed to overlap with 'ast_composite_t'
+// Guaranteed to overlap with 'ast_composite_t'
 typedef struct {
-    strong_cstr_t name;
-    ast_layout_t layout;
-    source_t source;
-    bool is_polymorphic;
+    DERIVE_AST_COMPOSITE;
     // ---------------------------
     strong_cstr_t *generics;
     length_t generics_length;
-} ast_polymorphic_composite_t;
+} ast_poly_composite_t;
 
 // ---------------- ast_alias_t ----------------
 // A type alias within the root AST
@@ -180,7 +188,7 @@ typedef struct {
 
 typedef struct {
     weak_cstr_t name;
-    funcid_t ast_func_id;
+    func_id_t ast_func_id;
     signed char is_beginning_of_group; // 1 == yes, 0 == no, -1 == uncalculated
 } ast_poly_func_t;
 
@@ -233,9 +241,9 @@ typedef struct {
     length_t polymorphic_methods_capacity;
 
     // Polymorphic composites
-    ast_polymorphic_composite_t *polymorphic_composites;
-    length_t polymorphic_composites_length;
-    length_t polymorphic_composites_capacity;
+    ast_poly_composite_t *poly_composites;
+    length_t poly_composites_length;
+    length_t poly_composites_capacity;
 } ast_t;
 
 #define LIBRARY_KIND_NONE           0x00
@@ -297,6 +305,11 @@ strong_cstr_t ast_func_args_str(ast_func_t *func);
 // of the head of a function
 strong_cstr_t ast_func_head_str(ast_func_t *func);
 
+// ---------------- ast_func_new ----------------
+// Allocates a new uninitialized AST function and
+// returns an id that can be used to access it
+func_id_t ast_new_func(ast_t *ast);
+
 // ---------------- ast_func_create_template ----------------
 // Fills out a blank template for a new function
 void ast_func_create_template(ast_func_t *func, const ast_func_head_t *options);
@@ -304,15 +317,6 @@ void ast_func_create_template(ast_func_t *func, const ast_func_head_t *options);
 // ---------------- ast_func_has_polymorphic_signature ----------------
 // Returns whether an AST function has polymorphic arguments or return type
 bool ast_func_has_polymorphic_signature(ast_func_t *func);
-
-// ---------------- ast_composite_init ----------------
-// Initializes an AST composite
-void ast_composite_init(ast_composite_t *composite, strong_cstr_t name, ast_layout_t layout, source_t source);
-
-// ---------------- ast_polymorphic_composite_init ----------------
-// Initializes a polymorphic AST composite
-void ast_polymorphic_composite_init(ast_polymorphic_composite_t *composite, strong_cstr_t name, ast_layout_t layout,
-    source_t source, strong_cstr_t *generics, length_t generics_length);
 
 // ---------------- ast_alias_init ----------------
 // Initializes an AST alias
@@ -326,9 +330,14 @@ void ast_enum_init(ast_enum_t *enum_definition, weak_cstr_t name, weak_cstr_t *k
 // Finds a composite by its exact name
 ast_composite_t *ast_composite_find_exact(ast_t *ast, const char *name);
 
-// ---------------- ast_polymorphic_composite_find_exact ----------------
+// ---------------- ast_poly_composite_find_exact ----------------
 // Finds a polymorphic composite by its exact name
-ast_polymorphic_composite_t *ast_polymorphic_composite_find_exact(ast_t *ast, const char *name);
+ast_poly_composite_t *ast_poly_composite_find_exact(ast_t *ast, const char *name);
+
+// ---------------- ast_find_composite ----------------
+// Finds a composite (polymorphic or not) using an AST type
+// Returns NULL if no such composite exists
+ast_composite_t *ast_find_composite(ast_t *ast, const ast_type_t *type);
 
 // ---------------- ast_composite_find_exact_field ----------------
 // Finds a field by name within a composite
@@ -358,7 +367,7 @@ maybe_index_t ast_find_global(ast_global_t *globals, length_t globals_length, we
 // ---------------- ast_func_end_is_reachable ----------------
 // Checks whether its possible to execute every statement in a function
 // and still have not returned
-bool ast_func_end_is_reachable(ast_t *ast, funcid_t ast_func_id);
+bool ast_func_end_is_reachable(ast_t *ast, func_id_t ast_func_id);
 bool ast_func_end_is_reachable_inner(ast_expr_list_t *stmts, unsigned int max_depth, unsigned int depth);
 
 // ---------------- ast_add_alias ----------------
@@ -369,14 +378,37 @@ void ast_add_alias(ast_t *ast, strong_cstr_t name, ast_type_t strong_type, trait
 // Adds an enum to the global scope of an AST
 void ast_add_enum(ast_t *ast, weak_cstr_t name, weak_cstr_t *kinds, length_t length, source_t source);
 
+// ---------------- ast_add_global_constant ----------------
+// Adds a constant named expression to the global scope of an AST
+void ast_add_global_constant(ast_t *ast, ast_constant_t new_constant);
+
+// ---------------- ast_add_poly_func ----------------
+// Adds a function to the list of polymorphic functions for an AST
+void ast_add_poly_func(ast_t *ast, weak_cstr_t func_name_persistent, func_id_t ast_func_id);
+
 // ---------------- ast_add_composite ----------------
 // Adds a composite to the global scope of an AST
-ast_composite_t *ast_add_composite(ast_t *ast, strong_cstr_t name, ast_layout_t layout, source_t source);
+ast_composite_t *ast_add_composite(
+    ast_t *ast,
+    strong_cstr_t name,
+    ast_layout_t layout,
+    source_t source,
+    const ast_type_t *maybe_parent,
+    bool is_class
+);
 
-// ---------------- ast_add_polymorphic_composite ----------------
+// ---------------- ast_add_poly_composite ----------------
 // Adds a polymorphic composite to the global scope of an AST
-ast_polymorphic_composite_t *ast_add_polymorphic_composite(ast_t *ast, strong_cstr_t name, ast_layout_t layout,
-    source_t source, strong_cstr_t *generics, length_t generics_length);
+ast_poly_composite_t *ast_add_poly_composite(
+    ast_t *ast,
+    strong_cstr_t name,
+    ast_layout_t layout,
+    source_t source,
+    const ast_type_t *maybe_parent,
+    bool is_class,
+    strong_cstr_t *generics,
+    length_t generics_length
+);
 
 // ---------------- ast_add_global ----------------
 // Adds a global variable to the global scope of an AST

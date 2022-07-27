@@ -202,7 +202,8 @@ errorcode_t parse_pragma(parse_ctx_t *ctx){
         return SUCCESS;
     case PRAGMA_HELP: // 'help' directive
         show_help(true);
-        return FAILURE;
+        ctx->compiler->result_flags |= COMPILER_RESULT_SUCCESS;
+        return ALT_FAILURE;
     case PRAGMA_IGNORE_ALL: // 'ignore_all' directive
         ctx->compiler->ignore |= COMPILER_IGNORE_ALL;
         return SUCCESS;
@@ -279,6 +280,7 @@ errorcode_t parse_pragma(parse_ctx_t *ctx){
         else if(streq(read, "less"))       ctx->compiler->optimization = OPTIMIZATION_LESS;
         else if(streq(read, "normal"))     ctx->compiler->optimization = OPTIMIZATION_DEFAULT;
         else if(streq(read, "aggressive")) ctx->compiler->optimization = OPTIMIZATION_AGGRESSIVE;
+        else if(streq(read, "nothing"))    ctx->compiler->optimization = OPTIMIZATION_ABSOLUTELY_NOTHING;
         else {
             // Invalid optimization level
             compiler_panic(ctx->compiler, ctx->tokenlist->sources[*i], "Invalid optimization level after 'pragma optimization'");

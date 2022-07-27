@@ -55,17 +55,23 @@ errorcode_t parse_tokens(parse_ctx_t *ctx){
         switch(tokens[i].id){
         case TOKEN_NEWLINE:
             break;
-        case TOKEN_FUNC: case TOKEN_STDCALL: case TOKEN_VERBATIM: case TOKEN_IMPLICIT: case TOKEN_CONSTRUCTOR:
+        case TOKEN_FUNC: case TOKEN_STDCALL: case TOKEN_VERBATIM: case TOKEN_IMPLICIT: case TOKEN_CONSTRUCTOR: case TOKEN_VIRTUAL: case TOKEN_OVERRIDE:
             if(parse_func(ctx)) return FAILURE;
             break;
-        case TOKEN_FOREIGN:
-            if(tokens[i + 1].id == TOKEN_STRING || tokens[i + 1].id == TOKEN_CSTRING){
-                if(parse_foreign_library(ctx)) return FAILURE;
-                break;
+        case TOKEN_FOREIGN: {
+                tokenid_t next = tokens[i + 1].id;
+
+                if(next == TOKEN_STRING || next == TOKEN_CSTRING){
+                    if(parse_foreign_library(ctx)) return FAILURE;
+                } else if(next == TOKEN_ENUM){
+                    *ctx->i += 1;
+                    if(parse_enum(ctx, true)) return FAILURE;
+                } else {
+                    if(parse_func(ctx)) return FAILURE;
+                }
             }
-            if(parse_func(ctx)) return FAILURE;
             break;
-        case TOKEN_STRUCT: case TOKEN_PACKED: case TOKEN_RECORD:
+        case TOKEN_STRUCT: case TOKEN_PACKED: case TOKEN_RECORD: case TOKEN_CLASS:
             if(parse_composite(ctx, false)) return FAILURE;
             break;
         case TOKEN_UNION:
@@ -101,7 +107,7 @@ errorcode_t parse_tokens(parse_ctx_t *ctx){
             if(parse_pragma(ctx)) return FAILURE;
             break;
         case TOKEN_ENUM:
-            if(parse_enum(ctx)) return FAILURE;
+            if(parse_enum(ctx, false)) return FAILURE;
             break;
         case TOKEN_META:
             if(parse_meta(ctx)) return FAILURE;
@@ -114,6 +120,13 @@ errorcode_t parse_tokens(parse_ctx_t *ctx){
                 ctx->object->current_namespace = NULL;
                 ctx->object->current_namespace_length = 0;
             } else if(ctx->composite_association != NULL){
+                // End of struct domain
+
+                if(ctx->composite_association->is_class && !ctx->composite_association->has_constructor){
+                    compiler_panicf(ctx->compiler, ctx->composite_association->source, "Class is missing constructor");
+                    return FAILURE;
+                }
+
                 ctx->composite_association = NULL;
             } else {
                 compiler_panicf(ctx->compiler, parse_ctx_peek_source(ctx), "Unexpected trailing closing brace '}'");
@@ -124,7 +137,7 @@ errorcode_t parse_tokens(parse_ctx_t *ctx){
             if(parse_namespace(ctx)) return FAILURE;
             break;
         default:
-            parse_panic_token(ctx, ctx->tokenlist->sources[i], tokens[i].id, "Encountered unexpected token '%s' in global scope");
+            parse_panic_token(ctx, ctx->tokenlist->sources[i], tokens[i].id, ctx->composite_association ? "Unexpected token '%s' in domain of composite" : "Unexpected token '%s' in global scope");
             return FAILURE;
         }
     }

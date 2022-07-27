@@ -82,7 +82,7 @@ void json_build_composite_definition(json_builder_t *builder, ast_composite_t *c
 
     if(composite->is_polymorphic){
         json_builder_append(builder, "<");
-        ast_polymorphic_composite_t *poly_composite = (ast_polymorphic_composite_t*) composite;
+        ast_poly_composite_t *poly_composite = (ast_poly_composite_t*) composite;
 
         for(length_t i = 0; i < poly_composite->generics_length; i++){
             json_builder_append(builder, "$");

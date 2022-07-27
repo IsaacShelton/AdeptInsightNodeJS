@@ -45,8 +45,11 @@ errorcode_t parse_global(parse_ctx_t *ctx){
         break;
     }
     
+    ast_type_t type = {0};
+    ast_expr_t *initial_value = NULL;
     strong_cstr_t name = parse_take_word(ctx, "INTERNAL ERROR: Expected word");
-    if(name == NULL) return FAILURE;
+
+    if(name == NULL) goto failure;
 
     parse_prepend_namespace(ctx, &name);
 
@@ -54,8 +57,7 @@ errorcode_t parse_global(parse_ctx_t *ctx){
         // Handle old style constant '==' syntax
 
         if(parse_old_style_constant_global(ctx, name, source)){
-            free(name);
-            return FAILURE;
+            goto failure;
         }
 
         return SUCCESS;
@@ -66,31 +68,29 @@ errorcode_t parse_global(parse_ctx_t *ctx){
         (*i)++;
     }
     
-    ast_expr_t *initial_value = NULL;
+    if(parse_type(ctx, &type)) goto failure;
 
-    ast_type_t type;
-    if(parse_type(ctx, &type)) return FAILURE;
-
-    if(tokens[*i].id == TOKEN_ASSIGN){
-        (*i)++;
-        if(tokens[*i].id == TOKEN_UNDEF){
+    if(parse_eat(ctx, TOKEN_ASSIGN, NULL) == SUCCESS){
+        if(parse_eat(ctx, TOKEN_UNDEF, NULL) == SUCCESS){
              // 'undef' does nothing for globals, so pretend like this is a plain definition
-            (*i)++;
         } else if(parse_expr(ctx, &initial_value)){
-            ast_type_free(&type);
-            return FAILURE;
+            goto failure;
         }
     }
 
     if(tokens[*i].id != TOKEN_NEWLINE){
         compiler_panicf(ctx->compiler, ctx->tokenlist->sources[*i], "Expected end-of-line after global variable definition");
-        if(initial_value) ast_expr_free_fully(initial_value);
-        ast_type_free(&type);
-        return FAILURE;
+        goto failure;
     }
 
     ast_add_global(ast, name, type, initial_value, traits, source);
     return SUCCESS;
+
+failure:
+    free(name);
+    ast_type_free(&type);
+    if(initial_value) ast_expr_free_fully(initial_value);
+    return FAILURE;
 }
 
 errorcode_t parse_constant_definition(parse_ctx_t *ctx, ast_constant_t *out_constant){
@@ -135,10 +135,13 @@ errorcode_t parse_constant_definition(parse_ctx_t *ctx, ast_constant_t *out_cons
     }
 
     // Construct the new constant value
-    out_constant->name = name;
-    out_constant->expression = value;
-    out_constant->traits = TRAIT_NONE;
-    out_constant->source = source;
+    *out_constant = (ast_constant_t){
+        .name = name,
+        .expression = value,
+        .traits = TRAIT_NONE,
+        .source = source,
+    };
+
     return SUCCESS;
 }
 
@@ -148,9 +151,7 @@ errorcode_t parse_global_constant_definition(parse_ctx_t *ctx){
     ast_constant_t new_constant;
     if(parse_constant_definition(ctx, &new_constant)) return FAILURE;
 
-    // Make room for another constant
-    expand((void**) &ast->constants, sizeof(ast_constant_t), ast->constants_length, &ast->constants_capacity, 1, 8);
-    ast->constants[ast->constants_length++] = new_constant;
+    ast_add_global_constant(ast, new_constant);
     return SUCCESS;
 }
 

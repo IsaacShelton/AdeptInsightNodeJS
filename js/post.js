@@ -25,9 +25,7 @@ function invokeInsight(query_json_string){
 }
 
 setTimeout(() => {
-    //var filename = "/Users/isaac/AdeptProjects/GenericCardGame/main.adept";
-    //var filename = "/Users/isaac/AdeptProjects/Box2D/examples/graphical/main.adept";
-    var filename = "/Users/isaac/Projects/Adept/bin/import/2.4/Array.adept";
+    var filename = "/Users/isaac/Projects/Adept/bin/import/2.7/Array.adept";
 
     var query = JSON.stringify(
         {
@@ -39,5 +37,5 @@ setTimeout(() => {
     );
 
     var result = invokeInsight(query);
-    console.log(result.ast.functions.filter(x => x.definition.includes("place")));
+    console.log(result);
 }, 100);

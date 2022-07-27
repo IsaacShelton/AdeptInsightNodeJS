@@ -7,7 +7,6 @@
 
 #include "DRVR/config.h"
 #include "UTIL/color.h"
-#include "UTIL/download.h"
 #include "UTIL/filename.h"
 #include "UTIL/ground.h"
 #include "UTIL/jsmn_helper.h"
@@ -15,17 +14,20 @@
 static successful_t config_read_adept_config_value(config_t *config, jsmnh_obj_ctx_t *parent_ctx, jsmntok_t *out_maybe_last_update);
 
 #ifdef ADEPT_ENABLE_PACKAGE_MANAGER
+#include "NET/download.h" // IWYU pragma: keep
 static successful_t config_update_last_updated(weak_cstr_t filename, jsmnh_buffer_t buffer, jsmntok_t last_update);
 static successful_t update_installation(config_t *config, download_buffer_t dlbuffer);
 static successful_t process_adept_stash_value(jsmnh_obj_ctx_t *parent_ctx, stash_header_t *out_header);
 #endif
 
-void config_prepare(config_t *config){
+void config_prepare(config_t *config, strong_cstr_t cainfo_file){
     memset(config, 0, sizeof(config_t));
+    config->cainfo_file = cainfo_file;
 }
 
 void config_free(config_t *config){
     free(config->stash);
+    free(config->cainfo_file);
 }
 
 successful_t config_read(config_t *config, weak_cstr_t filename, weak_cstr_t *out_warning){
@@ -60,7 +62,8 @@ successful_t config_read(config_t *config, weak_cstr_t filename, weak_cstr_t *ou
         goto failure;
     }
 
-    jsmntok_t maybe_last_update;
+    jsmntok_t *optional_last_update = NULL;
+    jsmntok_t last_update_storage;
 
     for(length_t section = 0; section != ctx.total_sections; section++){
         if(jsmnh_obj_ctx_read_key(&ctx)){
@@ -70,10 +73,12 @@ successful_t config_read(config_t *config, weak_cstr_t filename, weak_cstr_t *ou
 
         if(jsmnh_obj_ctx_eq(&ctx, "adept.config")){
             // Config information
-            if(!config_read_adept_config_value(config, &ctx, &maybe_last_update)){
+            if(!config_read_adept_config_value(config, &ctx, &last_update_storage)){
                 redprintf("Failed to handle value in configuration file\n");
                 goto failure;
             }
+
+            optional_last_update = &last_update_storage;
         } else if(jsmnh_obj_ctx_eq(&ctx, "installs")){
             // Local imports
         } else {
@@ -113,20 +118,10 @@ successful_t config_read(config_t *config, weak_cstr_t filename, weak_cstr_t *ou
 
     if(should_update){
         if(config->show_checking_for_updates_message){
-            blueprintf("NOTE: Checking for updates as scheduled in 'adept.config'\n");
+            lightblueprintf("Checking for available updates as scheduled in 'adept.config'\n");
         }
 
-        // Ignore failure to update last updated
-        if(maybe_last_update.type == JSMN_PRIMITIVE)
-            config_update_last_updated(filename, ctx.fulltext, maybe_last_update);
-
-        download_buffer_t dlbuffer;
-        if(download_to_memory(config->stash, &dlbuffer)){
-            update_installation(config, dlbuffer);
-            free(dlbuffer.bytes);
-        } else {
-            blueprintf("NOTE: Failed to check for updates as scheduled in 'adept.config', internet address unreachable\n");
-        }
+        try_update_installation(config, filename, &ctx.fulltext, optional_last_update);
     }
     #endif // ADEPT_ENABLE_PACKAGE_MANAGER
 
@@ -205,6 +200,21 @@ failure:
 }
 
 #ifdef ADEPT_ENABLE_PACKAGE_MANAGER
+    void try_update_installation(config_t *config, weak_cstr_t filename, jsmnh_buffer_t *optional_config_fulltext, jsmntok_t *optional_last_update){
+        // Try to store the last time we updated
+        // Ignore failure to update last updated
+        if(optional_config_fulltext && optional_last_update && optional_last_update->type == JSMN_PRIMITIVE)
+            config_update_last_updated(filename, *optional_config_fulltext, *optional_last_update);
+
+        download_buffer_t dlbuffer;
+        if(download_to_memory(config->stash, &dlbuffer, config->cainfo_file)){
+            update_installation(config, dlbuffer);
+            free(dlbuffer.bytes);
+        } else {
+            lightblueprintf("NOTE: Failed to check for updates as scheduled in 'adept.config', internet address unreachable\n");
+        }
+    }
+
     static successful_t config_update_last_updated(weak_cstr_t filename, jsmnh_buffer_t buffer, jsmntok_t last_update){
         if(last_update.type != JSMN_PRIMITIVE) return false;
     
@@ -257,12 +267,13 @@ failure:
                     !streq(stash_header.latest_compiler_version, ADEPT_PREVIOUS_STABLE_VERSION_STRING) &&
                     config->show_new_compiler_available
                 ){
-                    blueprintf("\nNEWS: A newer version of Adept is available!\n");
+                    printf(" -> Compiler is out of date!!!\n");
+                    lightblueprintf("\nNEWS: A newer version of Adept is available!\n");
                     printf("    Visit https://github.com/AdeptLanguage/Adept for more information!\n");
                     printf("    You can disable update checks in your 'adept.config'\n\n");
                     goto success;
                 } else if(config->show_checking_for_updates_message){
-                    blueprintf(" -> Already up to date!\n");
+                    lightblueprintf(" -> Already up to date!\n");
                 }
     
                 // Free potentially allocated values

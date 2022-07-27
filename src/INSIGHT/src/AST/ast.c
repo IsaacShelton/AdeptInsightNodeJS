@@ -45,8 +45,8 @@ void ast_init(ast_t *ast, unsigned int cross_compile_for){
     ast->library_kinds = NULL;
     ast->libraries_length = 0;
     ast->libraries_capacity = 0;
-    ast_type_make_base(&ast->common.ast_int_type, strclone("int"));
-    ast_type_make_base(&ast->common.ast_usize_type, strclone("usize"));
+    ast->common.ast_int_type = ast_type_make_base(strclone("int"));
+    ast->common.ast_usize_type = ast_type_make_base(strclone("usize"));
     ast->common.ast_variadic_array = NULL;
     ast->common.ast_initializer_list = NULL;
 
@@ -60,9 +60,9 @@ void ast_init(ast_t *ast, unsigned int cross_compile_for){
     ast->polymorphic_methods = NULL;
     ast->polymorphic_methods_length = 0;
     ast->polymorphic_methods_capacity = 0;
-    ast->polymorphic_composites = NULL;
-    ast->polymorphic_composites_length = 0;
-    ast->polymorphic_composites_capacity = 0;
+    ast->poly_composites = NULL;
+    ast->poly_composites_length = 0;
+    ast->poly_composites_capacity = 0;
 
     // Add relevant standard meta definitions
 
@@ -131,7 +131,7 @@ void ast_init(ast_t *ast, unsigned int cross_compile_for){
 
     // __unix__
     meta_definition_add_bool(&ast->meta_definitions, &ast->meta_definitions_length, &ast->meta_definitions_capacity, "__unix__",
-    #if defined(__unix__) || defined(__unix) || defined(unix)
+    #if defined(__unix__) || defined(__unix) || defined(unix) || defined(__APPLE__) || defined(__MACH__)
         cross_compile_for == CROSS_COMPILE_NONE
     #elif defined(__EMSCRIPTEN__)
         EM_ASM_INT({
@@ -211,14 +211,14 @@ void ast_free(ast_t *ast){
     free(ast->poly_funcs);
     free(ast->polymorphic_methods);
 
-    for(i = 0; i != ast->polymorphic_composites_length; i++){
-        ast_polymorphic_composite_t *poly_composite = &ast->polymorphic_composites[i];
+    for(i = 0; i != ast->poly_composites_length; i++){
+        ast_poly_composite_t *poly_composite = &ast->poly_composites[i];
 
         ast_free_composites((ast_composite_t*) poly_composite, 1);
         free_strings(poly_composite->generics, poly_composite->generics_length);
     }
 
-    free(ast->polymorphic_composites);
+    free(ast->poly_composites);
 }
 
 void ast_free_functions(ast_func_t *functions, length_t functions_length){
@@ -745,7 +745,7 @@ void ast_dump_composite(FILE *file, ast_composite_t *composite, length_t additio
 
     // Dump generics "<$K, $V>" if the composite is polymorphic
     if(composite->is_polymorphic){
-        ast_polymorphic_composite_t *poly_composite = (ast_polymorphic_composite_t*) composite;
+        ast_poly_composite_t *poly_composite = (ast_poly_composite_t*) composite;
 
         fprintf(file, "<");
 
@@ -886,6 +886,11 @@ maybe_null_weak_cstr_t ast_method_get_subject_typename(ast_func_t *method){
     }
 }
 
+func_id_t ast_new_func(ast_t *ast){
+    expand((void**) &ast->funcs, sizeof(ast_func_t), ast->funcs_length, &ast->funcs_capacity, 1, 4);
+    return ast->funcs_length++;
+}
+
 void ast_func_create_template(ast_func_t *func, const ast_func_head_t *options){
     func->name = options->name;
     func->arg_names = NULL;
@@ -905,6 +910,7 @@ void ast_func_create_template(ast_func_t *func, const ast_func_head_t *options){
     func->statements = (ast_expr_list_t){0};
     func->source = options->source;
     func->export_as = options->export_name;
+    func->virtual_source = INVALID_FUNC_ID;
 
     #if ADEPT_INSIGHT_BUILD
     func->end_source = options->source;
@@ -915,6 +921,8 @@ void ast_func_create_template(ast_func_t *func, const ast_func_head_t *options){
     if(streq(options->name, "__pass__"))  func->traits |= AST_FUNC_PASS  | (options->prefixes.is_verbatim ? TRAIT_NONE : AST_FUNC_AUTOGEN);
     if(options->prefixes.is_stdcall)      func->traits |= AST_FUNC_STDCALL;
     if(options->prefixes.is_implicit)     func->traits |= AST_FUNC_IMPLICIT;
+    if(options->prefixes.is_virtual)      func->traits |= AST_FUNC_VIRTUAL;
+    if(options->prefixes.is_override)     func->traits |= AST_FUNC_OVERRIDE;
     if(options->is_foreign)               func->traits |= AST_FUNC_FOREIGN;
 
     // Handle WinMain
@@ -926,22 +934,6 @@ void ast_func_create_template(ast_func_t *func, const ast_func_head_t *options){
 bool ast_func_has_polymorphic_signature(ast_func_t *func){
     return ast_type_list_has_polymorph(func->arg_types, func->arity)
         || ast_type_has_polymorph(&func->return_type);
-}
-
-void ast_composite_init(ast_composite_t *composite, strong_cstr_t name, ast_layout_t layout, source_t source){
-    composite->name = name;
-    composite->layout = layout;
-    composite->source = source;
-    composite->is_polymorphic = false;
-}
-
-void ast_polymorphic_composite_init(ast_polymorphic_composite_t *composite, strong_cstr_t name, ast_layout_t layout, source_t source, strong_cstr_t *generics, length_t generics_length){
-    composite->name = name;
-    composite->layout = layout;
-    composite->source = source;
-    composite->is_polymorphic = true;
-    composite->generics = generics;
-    composite->generics_length = generics_length;
 }
 
 void ast_alias_init(ast_alias_t *alias, weak_cstr_t name, ast_type_t type, trait_t traits, source_t source){
@@ -974,13 +966,49 @@ successful_t ast_composite_find_exact_field(ast_composite_t *composite, const ch
     return true;
 }
 
-ast_polymorphic_composite_t *ast_polymorphic_composite_find_exact(ast_t *ast, const char *name){
+ast_poly_composite_t *ast_poly_composite_find_exact(ast_t *ast, const char *name){
     // TODO: Maybe sort and do a binary search or something
-    for(length_t i = 0; i != ast->polymorphic_composites_length; i++){
-        if(streq(ast->polymorphic_composites[i].name, name)){
-            return &ast->polymorphic_composites[i];
+    for(length_t i = 0; i != ast->poly_composites_length; i++){
+        if(streq(ast->poly_composites[i].name, name)){
+            return &ast->poly_composites[i];
         }
     }
+    return NULL;
+}
+
+ast_composite_t *ast_find_composite(ast_t *ast, const ast_type_t *type){
+    if(type->elements_length != 1) return NULL;
+
+    switch(type->elements[0]->id){
+    case AST_ELEM_BASE: {
+            const char *target_name = ((ast_elem_base_t*) type->elements[0])->base;
+
+            for(length_t i = 0; i != ast->composites_length; i++){
+                ast_composite_t *composite = &ast->composites[i];
+
+                if(streq(composite->name, target_name)){
+                    return composite;
+                }
+            }
+        }
+        break;
+    case AST_ELEM_GENERIC_BASE: {
+            ast_elem_generic_base_t *generic_base_elem = (ast_elem_generic_base_t*) type->elements[0];
+
+            const char *target_name = generic_base_elem->name;
+            length_t generics_count = generic_base_elem->generics_length;
+
+            for(length_t i = 0; i != ast->poly_composites_length; i++){
+                ast_poly_composite_t *poly_composite = &ast->poly_composites[i];
+
+                if(streq(poly_composite->name, target_name) && poly_composite->generics_length == generics_count){
+                    return (ast_composite_t*) poly_composite;
+                }
+            }
+        }
+        break;
+    }
+
     return NULL;
 }
 
@@ -1095,7 +1123,7 @@ bool ast_func_end_is_reachable_inner(ast_expr_list_t *stmts, unsigned int max_de
     return true;
 }
 
-bool ast_func_end_is_reachable(ast_t *ast, funcid_t ast_func_id){
+bool ast_func_end_is_reachable(ast_t *ast, func_id_t ast_func_id){
     // Ensure that the reference we're working with isn't one that was previously invalidated
     return ast_func_end_is_reachable_inner(&ast->funcs[ast_func_id].statements, 20, 0);
 }
@@ -1112,19 +1140,72 @@ void ast_add_enum(ast_t *ast, strong_cstr_t name, weak_cstr_t *kinds, length_t l
     ast_enum_init(&ast->enums[ast->enums_length++], name, kinds, length, source);
 }
 
-ast_composite_t *ast_add_composite(ast_t *ast, strong_cstr_t name, ast_layout_t layout, source_t source){
+void ast_add_global_constant(ast_t *ast, ast_constant_t new_constant){
+    // Make room for another constant
+    expand((void**) &ast->constants, sizeof(ast_constant_t), ast->constants_length, &ast->constants_capacity, 1, 8);
+    ast->constants[ast->constants_length++] = new_constant;
+}
+
+void ast_add_poly_func(ast_t *ast, weak_cstr_t func_name_persistent, func_id_t ast_func_id){
+    expand((void**) &ast->poly_funcs, sizeof(ast_poly_func_t), ast->poly_funcs_length, &ast->poly_funcs_capacity, 1, 4);
+
+    ast_poly_func_t *poly_func = &ast->poly_funcs[ast->poly_funcs_length++];
+    poly_func->name = func_name_persistent;
+    poly_func->ast_func_id = ast_func_id;
+    poly_func->is_beginning_of_group = -1; // Uncalculated
+}
+
+ast_composite_t *ast_add_composite(
+    ast_t *ast,
+    strong_cstr_t name,
+    ast_layout_t layout,
+    source_t source,
+    const ast_type_t *maybe_parent,
+    bool is_class
+){
     expand((void**) &ast->composites, sizeof(ast_composite_t), ast->composites_length, &ast->composites_capacity, 1, 4);
 
     ast_composite_t *composite = &ast->composites[ast->composites_length++];
-    ast_composite_init(composite, name, layout, source);
+
+    *composite = (ast_composite_t){
+        .name = name,
+        .layout = layout,
+        .source = source,
+        .parent = maybe_parent ? ast_type_clone(maybe_parent) : (ast_type_t){0},
+        .is_polymorphic = false,
+        .is_class = is_class,
+        .has_constructor = false,
+    };
+
     return composite;
 }
 
-ast_polymorphic_composite_t *ast_add_polymorphic_composite(ast_t *ast, strong_cstr_t name, ast_layout_t layout, source_t source, strong_cstr_t *generics, length_t generics_length){
-    expand((void**) &ast->polymorphic_composites, sizeof(ast_polymorphic_composite_t), ast->polymorphic_composites_length, &ast->polymorphic_composites_capacity, 1, 4);
+ast_poly_composite_t *ast_add_poly_composite(
+    ast_t *ast,
+    strong_cstr_t name,
+    ast_layout_t layout,
+    source_t source,
+    const ast_type_t *maybe_parent,
+    bool is_class,
+    strong_cstr_t *generics,
+    length_t generics_length
+){
+    expand((void**) &ast->poly_composites, sizeof(ast_poly_composite_t), ast->poly_composites_length, &ast->poly_composites_capacity, 1, 4);
 
-    ast_polymorphic_composite_t *poly_composite = &ast->polymorphic_composites[ast->polymorphic_composites_length++];
-    ast_polymorphic_composite_init(poly_composite, name, layout, source, generics, generics_length);
+    ast_poly_composite_t *poly_composite = &ast->poly_composites[ast->poly_composites_length++];
+
+    *poly_composite = (ast_poly_composite_t){
+        .name = name,
+        .layout = layout,
+        .source = source,
+        .parent = maybe_parent ? ast_type_clone(maybe_parent) : (ast_type_t){0},
+        .is_polymorphic = true,
+        .is_class = is_class,
+        .has_constructor = false,
+        .generics = generics,
+        .generics_length = generics_length,
+    };
+
     return poly_composite;
 }
 
@@ -1132,12 +1213,15 @@ void ast_add_global(ast_t *ast, strong_cstr_t name, ast_type_t type, ast_expr_t 
     expand((void**) &ast->globals, sizeof(ast_global_t), ast->globals_length, &ast->globals_capacity, 1, 8);
 
     ast_global_t *global = &ast->globals[ast->globals_length++];
-    global->name = name;
-    global->name_length = strlen(name);
-    global->type = type;
-    global->initial = initial_value;
-    global->traits = traits;
-    global->source = source;
+
+    *global = (ast_global_t){
+        .name = name,
+        .name_length = strlen(name),
+        .type = type,
+        .initial = initial_value,
+        .traits = traits,
+        .source = source,
+    };
 }
 
 void ast_add_foreign_library(ast_t *ast, strong_cstr_t library, char kind){
@@ -1151,14 +1235,16 @@ void va_args_inject_ast(compiler_t *compiler, ast_t *ast){
 
     if(compiler->cross_compile_for == CROSS_COMPILE_NONE && sizeof(va_list) <= 8){
         // Small va_list
-        strong_cstr_t names[1];
-        names[0] = strclone("_opaque");
+        strong_cstr_t names[1] = {
+            strclone("_opaque"),
+        };
 
-        ast_type_t types[1];
-        ast_type_make_base(&types[0], strclone("ptr"));
+        ast_type_t types[1] = {
+            ast_type_make_base(strclone("ptr")),
+        };
 
         ast_layout_init_with_struct_fields(&layout, names, types, 1);
-        ast_add_composite(ast, strclone("va_list"), layout, NULL_SOURCE);
+        ast_add_composite(ast, strclone("va_list"), layout, NULL_SOURCE, NULL, false);
     } else {
         // Larger Intel x86_64 va_list
 
@@ -1176,14 +1262,15 @@ void va_args_inject_ast(compiler_t *compiler, ast_t *ast){
         names[2] = strclone("_opaque3");
         names[3] = strclone("_opaque4");
 
-        ast_type_t types[4];
-        ast_type_make_base(&types[0], strclone("int"));
-        ast_type_make_base(&types[1], strclone("int"));
-        ast_type_make_base(&types[2], strclone("ptr"));
-        ast_type_make_base(&types[3], strclone("ptr"));
+        ast_type_t types[4] = {
+            ast_type_make_base(strclone("int")),
+            ast_type_make_base(strclone("int")),
+            ast_type_make_base(strclone("ptr")),
+            ast_type_make_base(strclone("ptr")),
+        };
         
         ast_layout_init_with_struct_fields(&layout, names, types, 1);
-        ast_add_composite(ast, strclone("va_list"), layout, NULL_SOURCE);
+        ast_add_composite(ast, strclone("va_list"), layout, NULL_SOURCE, NULL, false);
     }
 }
 

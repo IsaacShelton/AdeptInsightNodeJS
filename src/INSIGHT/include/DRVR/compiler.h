@@ -61,10 +61,11 @@ extern "C" {
 #define COMPILER_IGNORE_ALL                     TRAIT_ALL
 
 // Possible optimization levels
-#define OPTIMIZATION_NONE       0x00
-#define OPTIMIZATION_LESS       0x01
-#define OPTIMIZATION_DEFAULT    0x02
-#define OPTIMIZATION_AGGRESSIVE 0x03
+#define OPTIMIZATION_NONE               0x00
+#define OPTIMIZATION_LESS               0x01
+#define OPTIMIZATION_DEFAULT            0x02
+#define OPTIMIZATION_AGGRESSIVE         0x03
+#define OPTIMIZATION_ABSOLUTELY_NOTHING 0x04
 
 // Possible compiler debug trait options
 #ifdef ENABLE_DEBUG_FEATURES
@@ -98,6 +99,7 @@ typedef struct compiler {
 
     // Compiler persistent configuration options
     config_t config;
+    maybe_null_strong_cstr_t config_filename;
 
     // Compiler command-line configuration options
     trait_t traits;            // COMPILER_* options
@@ -221,7 +223,7 @@ errorcode_t compiler_create_package(compiler_t *compiler, object_t *object);
 errorcode_t compiler_read_file(compiler_t *compiler, object_t *object);
 
 // ---------------- compiler_get_stdlib ----------------
-// Returns the current stdlib folder, including the preceeding slash
+// Returns the current stdlib folder, including the preceding slash
 strong_cstr_t compiler_get_stdlib(compiler_t *compiler, object_t *optional_object);
 
 // ---------------- compiler_print_source ----------------
@@ -258,16 +260,12 @@ void compiler_vwarnf(compiler_t *compiler, source_t source, const char *format, 
 void compiler_undeclared_function(compiler_t *compiler, object_t *object, source_t source,
     weak_cstr_t name, ast_type_t *types, length_t arity, ast_type_t *gives, bool is_method);
 
-typedef listof(funcid_t, ids) funcid_list_t;
-#define funcid_list_append(LIST, VALUE) list_append((LIST), (VALUE), funcid_t)
-#define funcid_list_free(LIST) free((LIST)->ids)
-
 // ---------------- compiler_possibilities ----------------
 // Returns a list of IDs of possible AST functions that
 // are similar the supplied parameters
 // NOTE: If 'methods_only_type_of_this' is not NULL, then only
 // methods with a 'this' type of it will be included.
-funcid_list_t compiler_possibilities(compiler_t *compiler, object_t *object, weak_cstr_t name, ast_type_t *methods_only_type_of_this);
+func_id_list_t compiler_possibilities(compiler_t *compiler, object_t *object, weak_cstr_t name, ast_type_t *methods_only_type_of_this);
 #endif
 
 // ---------------- print_candidate ----------------

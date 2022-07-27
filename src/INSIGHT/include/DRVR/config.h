@@ -7,7 +7,6 @@ extern "C" {
 #endif
 
 #include "UTIL/ground.h"
-#include "UTIL/download.h"
 
 enum update_schedule {
     UPDATE_SCHEDULE_NEVER,
@@ -20,6 +19,8 @@ enum update_schedule {
 };
 
 typedef struct {
+    strong_cstr_t cainfo_file;
+
     bool has;
     enum update_schedule update;
     long long last_updated;
@@ -34,9 +35,17 @@ typedef struct {
     strong_cstr_t latest_compiler_version;
 } stash_header_t;
 
-void config_prepare(config_t *config);
+void config_prepare(config_t *config, strong_cstr_t cainfo_file);
 void config_free(config_t *config);
 successful_t config_read(config_t *config, weak_cstr_t filename, weak_cstr_t *out_warning);
+
+#ifdef ADEPT_ENABLE_PACKAGE_MANAGER
+    #define JSMN_HEADER
+    #include "UTIL/jsmn.h"
+    #include "UTIL/jsmn_helper.h"
+
+    void try_update_installation(config_t *config, weak_cstr_t filename, jsmnh_buffer_t *optional_config_fulltext, jsmntok_t *optional_last_update);
+#endif
 
 #ifdef __cplusplus
 }

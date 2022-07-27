@@ -80,13 +80,13 @@ void build_ast(json_builder_t *builder, compiler_t *compiler, object_t *object){
     json_build_object_key(builder, "composites");
     json_build_array_start(builder);
 
-    bool has_some_composites = ast->composites_length || ast->polymorphic_composites_length;
+    bool has_some_composites = ast->composites_length || ast->poly_composites_length;
 
     for(length_t i = 0; i < ast->composites_length; i++){
         add_composite_definition(builder, &ast->composites[i]);
     }
-    for(length_t i = 0; i < ast->polymorphic_composites_length; i++){
-        add_composite_definition(builder, (ast_composite_t*) &ast->polymorphic_composites[i]);
+    for(length_t i = 0; i < ast->poly_composites_length; i++){
+        add_composite_definition(builder, (ast_composite_t*) &ast->poly_composites[i]);
     }
     
     if(has_some_composites) json_builder_remove(builder, 1); // Remove trailing ','
