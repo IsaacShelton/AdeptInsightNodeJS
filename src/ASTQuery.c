@@ -27,6 +27,34 @@ static void add_function_definition(json_builder_t *builder, compiler_t *compile
     json_build_object_next(builder);
 }
 
+static void add_function_alias_definition(json_builder_t *builder, compiler_t *compiler, ast_func_alias_t *falias){
+    json_build_object_start(builder);
+    json_build_object_key(builder, "name");
+    json_build_string(builder, falias->from);
+    json_build_object_next(builder);
+    json_build_object_key(builder, "definition");
+
+    json_builder_append(builder, "\"");
+    json_builder_append(builder, "func alias ");
+    json_builder_append(builder, falias->from);
+
+    if(!falias->match_first_of_name){
+        json_build_func_parameters(builder, NULL, falias->arg_types, NULL, NULL, falias->arity, falias->required_traits, NULL);
+    }
+    
+    json_builder_append(builder, " => ");
+    json_builder_append(builder, falias->to);
+
+    json_builder_append(builder, "\"");
+
+    json_build_object_next(builder);
+    json_build_object_key(builder, "source");
+    json_build_source(builder, compiler, falias->source);
+    json_build_object_end(builder);
+
+    json_build_object_next(builder);
+}
+
 static void add_composite_definition(json_builder_t *builder, ast_composite_t *composite){
     json_build_object_start(builder);
     json_build_object_key(builder, "name");
@@ -59,6 +87,26 @@ static void add_enum_definition(json_builder_t *builder, ast_enum_t *enum_value)
     json_build_object_next(builder);
 }
 
+static void add_alias_definition(json_builder_t *builder, ast_alias_t *alias){
+    json_build_object_start(builder);
+    json_build_object_key(builder, "name");
+    json_build_string(builder, alias->name);
+    json_build_object_next(builder);
+    json_build_object_key(builder, "definition");
+    json_builder_append(builder, "\"alias ");
+    json_builder_append_escaped(builder, alias->name);
+    json_builder_append(builder, " = ");
+
+    strong_cstr_t typename = ast_type_str(&alias->type);
+    json_builder_append_escaped(builder, typename);
+    free(typename);
+
+    json_builder_append(builder, "\"");
+    json_build_object_end(builder);
+
+    json_build_object_next(builder);
+}
+
 static void add_constant_definition(json_builder_t *builder, ast_constant_t *constant){
     json_build_object_start(builder);
     json_build_object_key(builder, "name");
@@ -83,60 +131,64 @@ void build_ast(json_builder_t *builder, compiler_t *compiler, object_t *object){
 
     json_build_object_start(builder);
 
-    json_build_object_key(builder, "functions");
-    json_build_array_start(builder);
+    {
+        json_build_object_key(builder, "functions");
+        json_build_array_start(builder);
+        for(length_t i = 0; i < ast->funcs_length; i++){
+            add_function_definition(builder, compiler, &ast->funcs[i]);
+        }
+        if(ast->funcs_length) json_builder_remove(builder, 1); // Remove trailing ','
+        json_build_array_end(builder);
+        json_build_object_next(builder);
 
-    bool has_some_functions = ast->funcs_length || ast->poly_funcs_length;
+        json_build_object_key(builder, "function_aliases");
+        json_build_array_start(builder);
+        for(length_t i = 0; i < ast->func_aliases_length; i++){
+            add_function_alias_definition(builder, compiler, &ast->func_aliases[i]);
+        }
+        if(ast->func_aliases_length) json_builder_remove(builder, 1); // Remove trailing ','
+        json_build_array_end(builder);
+        json_build_object_next(builder);
 
-    for(length_t i = 0; i < ast->funcs_length; i++){
-        add_function_definition(builder, compiler, &ast->funcs[i]);
+        json_build_object_key(builder, "composites");
+        json_build_array_start(builder);
+        for(length_t i = 0; i < ast->composites_length; i++){
+            add_composite_definition(builder, &ast->composites[i]);
+        }
+        for(length_t i = 0; i < ast->poly_composites_length; i++){
+            add_composite_definition(builder, (ast_composite_t*) &ast->poly_composites[i]);
+        }
+        if(ast->composites_length || ast->poly_composites_length) json_builder_remove(builder, 1); // Remove trailing ','
+        json_build_array_end(builder);
+        json_build_object_next(builder);
+
+        json_build_object_key(builder, "enums");
+        json_build_array_start(builder);
+        for(length_t i = 0; i < ast->enums_length; i++){
+            add_enum_definition(builder, &ast->enums[i]);
+        }
+        if(ast->enums_length) json_builder_remove(builder, 1); // Remove trailing ','
+        json_build_array_end(builder);
+        json_build_object_next(builder);
+
+        json_build_object_key(builder, "aliases");
+        json_build_array_start(builder);
+        for(length_t i = 0; i < ast->aliases_length; i++){
+            add_alias_definition(builder, &ast->aliases[i]);
+        }
+        if(ast->aliases_length) json_builder_remove(builder, 1); // Remove trailing ','
+        json_build_array_end(builder);
+        json_build_object_next(builder);
+
+        json_build_object_key(builder, "constants");
+        json_build_array_start(builder);
+        for(length_t i = 0; i < ast->constants_length; i++){
+            add_constant_definition(builder, &ast->constants[i]);
+        }
+
+        if(ast->constants_length) json_builder_remove(builder, 1); // Remove trailing ','
+        json_build_array_end(builder);
     }
-
-    if(has_some_functions) json_builder_remove(builder, 1); // Remove trailing ','
-
-    json_build_array_end(builder);
-    json_build_object_next(builder);
-    json_build_object_key(builder, "composites");
-    json_build_array_start(builder);
-
-    bool has_some_composites = ast->composites_length || ast->poly_composites_length;
-
-    for(length_t i = 0; i < ast->composites_length; i++){
-        add_composite_definition(builder, &ast->composites[i]);
-    }
-    for(length_t i = 0; i < ast->poly_composites_length; i++){
-        add_composite_definition(builder, (ast_composite_t*) &ast->poly_composites[i]);
-    }
-    
-    if(has_some_composites) json_builder_remove(builder, 1); // Remove trailing ','
-
-    json_build_array_end(builder);
-    json_build_object_next(builder);
-    json_build_object_key(builder, "enums");
-    json_build_array_start(builder);
-
-    bool has_some_enums = ast->enums_length;
-
-    for(length_t i = 0; i < ast->enums_length; i++){
-        add_enum_definition(builder, &ast->enums[i]);
-    }
-
-    if(has_some_enums) json_builder_remove(builder, 1); // Remove trailing ','
-
-    json_build_array_end(builder);
-    json_build_object_next(builder);
-    json_build_object_key(builder, "constants");
-    json_build_array_start(builder);
-
-    bool has_some_constants = ast->constants_length;
-
-    for(length_t i = 0; i < ast->constants_length; i++){
-        add_constant_definition(builder, &ast->constants[i]);
-    }
-
-    if(has_some_constants) json_builder_remove(builder, 1); // Remove trailing ','
-    json_build_array_end(builder);
-
     json_build_object_end(builder);
 }
 

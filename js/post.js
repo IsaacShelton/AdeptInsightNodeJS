@@ -25,7 +25,7 @@ function invokeInsight(query_json_string){
 }
 
 setTimeout(() => {
-    var filename = "/Users/isaac/Projects/Adept/build/macOS-Debug/import/curl/curl.adept";
+    var filename = "/Users/isaac/Projects/Adept/build/macOS-Debug/import/2.7/basics.adept";
 
     var query = JSON.stringify(
         {

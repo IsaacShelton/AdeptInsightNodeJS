@@ -17,56 +17,71 @@ void json_build_source(json_builder_t *builder, compiler_t *compiler, source_t s
 }
 
 void json_build_func_definition(json_builder_t *builder, ast_func_t *func){
-    char *s;
+    json_builder_append(builder, "\"");
+
+    json_builder_append_escaped(builder, func->name);
+
+    json_build_func_parameters(builder, func->arg_names, func->arg_types, func->arg_type_traits, func->arg_defaults, func->arity, TRAIT_NONE, func->variadic_arg_name);
+    json_builder_append(builder, " ");
+
+    strong_cstr_t s = ast_type_str(&func->return_type);
+    json_builder_append_escaped(builder, s);
+    free(s);
 
     json_builder_append(builder, "\"");
-    json_builder_append_escaped(builder, func->name);
+}
+
+void json_build_func_parameters(
+    json_builder_t *builder,
+    weak_cstr_t *arg_names,
+    ast_type_t *arg_types,
+    trait_t *arg_type_traits,
+    ast_expr_t **arg_defaults,
+    length_t arity,
+    trait_t traits,
+    maybe_null_weak_cstr_t variadic_arg_name
+){
     json_builder_append(builder, "(");
 
-    for(length_t i = 0; i != func->arity; i++){
-        bool is_last = i + 1 == func->arity;
+    for(length_t i = 0; i != arity; i++){
+        bool is_last = i + 1 == arity;
 
-        if(func->arg_names){
-            while(!is_last && ast_types_identical(&func->arg_types[i], &func->arg_types[i + 1])){
-                json_builder_append_escaped(builder, func->arg_names[i]);
-                if(func->arg_defaults && func->arg_defaults[i]) json_builder_append(builder, "?");
+        if(arg_names){
+            while(!is_last && ast_types_identical(&arg_types[i], &arg_types[i + 1])){
+                json_builder_append_escaped(builder, arg_names[i]);
+                if(arg_defaults && arg_defaults[i]) json_builder_append(builder, "?");
                 json_builder_append(builder, ", ");
-                is_last = ++i + 1 == func->arity;
+                is_last = ++i + 1 == arity;
             }
 
-            json_builder_append_escaped(builder, func->arg_names[i]);
-            if(func->arg_defaults && func->arg_defaults[i]) json_builder_append(builder, "?");
+            json_builder_append_escaped(builder, arg_names[i]);
+            if(arg_defaults && arg_defaults[i]) json_builder_append(builder, "?");
             json_builder_append(builder, " ");
         }
 
-        if(func->arg_type_traits[i] & AST_FUNC_ARG_TYPE_TRAIT_POD){
+        if(arg_type_traits && arg_type_traits[i] & AST_FUNC_ARG_TYPE_TRAIT_POD){
             json_builder_append(builder, " POD ");
         }
 
-        s = ast_type_str(&func->arg_types[i]);
+        strong_cstr_t s = ast_type_str(&arg_types[i]);
         json_builder_append_escaped(builder, s);
         free(s);
 
         if(!is_last){
             json_builder_append(builder, ", ");
-        } else if(func->traits & AST_FUNC_VARARG){
+        } else if(traits & AST_FUNC_VARARG){
             json_builder_append(builder, ", ...");
-        } else if(func->traits & AST_FUNC_VARIADIC){
+        } else if(traits & AST_FUNC_VARIADIC){
             json_builder_append(builder, ", ");
         }
     }
 
-    if(func->traits & AST_FUNC_VARIADIC){
-        json_builder_append_escaped(builder, func->variadic_arg_name);
+    if(traits & AST_FUNC_VARIADIC){
+        json_builder_append_escaped(builder, variadic_arg_name);
         json_builder_append(builder, " ...");
     }
 
-    json_builder_append(builder, ") ");
-
-    s = ast_type_str(&func->return_type);
-    json_builder_append_escaped(builder, s);
-    free(s);
-    json_builder_append(builder, "\"");
+    json_builder_append(builder, ")");
 }
 
 void json_build_composite_definition(json_builder_t *builder, ast_composite_t *composite){
