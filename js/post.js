@@ -25,12 +25,12 @@ function invokeInsight(query_json_string){
 }
 
 setTimeout(() => {
-    var filename = "/Users/isaac/Projects/Adept/bin/import/2.7/Array.adept";
+    var filename = "/Users/isaac/Projects/Adept/build/macOS-Debug/import/curl/curl.adept";
 
     var query = JSON.stringify(
         {
             "query": "ast",
-            "infrastructure": "/Users/isaac/Projects/Adept/bin/",
+            "infrastructure": "/Users/isaac/Projects/Adept/build/macOS-Debug/",
             "filename": filename,
             "code": require('fs').readFileSync(filename, "utf8")
         }

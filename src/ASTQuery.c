@@ -59,6 +59,25 @@ static void add_enum_definition(json_builder_t *builder, ast_enum_t *enum_value)
     json_build_object_next(builder);
 }
 
+static void add_constant_definition(json_builder_t *builder, ast_constant_t *constant){
+    json_build_object_start(builder);
+    json_build_object_key(builder, "name");
+    json_build_string(builder, constant->name);
+    json_build_object_next(builder);
+    json_build_object_key(builder, "definition");
+    json_builder_append(builder, "\"define ");
+    json_builder_append_escaped(builder, constant->name);
+    json_builder_append(builder, " = ");
+
+    strong_cstr_t value = ast_expr_str(constant->expression);
+    json_builder_append_escaped(builder, value);
+    free(value);
+    json_builder_append(builder, "\"");
+    json_build_object_end(builder);
+
+    json_build_object_next(builder);
+}
+
 void build_ast(json_builder_t *builder, compiler_t *compiler, object_t *object){
     ast_t *ast = &object->ast;
 
@@ -103,6 +122,19 @@ void build_ast(json_builder_t *builder, compiler_t *compiler, object_t *object){
     }
 
     if(has_some_enums) json_builder_remove(builder, 1); // Remove trailing ','
+
+    json_build_array_end(builder);
+    json_build_object_next(builder);
+    json_build_object_key(builder, "constants");
+    json_build_array_start(builder);
+
+    bool has_some_constants = ast->constants_length;
+
+    for(length_t i = 0; i < ast->constants_length; i++){
+        add_constant_definition(builder, &ast->constants[i]);
+    }
+
+    if(has_some_constants) json_builder_remove(builder, 1); // Remove trailing ','
     json_build_array_end(builder);
 
     json_build_object_end(builder);
