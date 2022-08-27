@@ -46,7 +46,11 @@ typedef struct {
     ast_expr_list_t statements;
     source_t source;
     maybe_null_strong_cstr_t export_as;
-    func_id_t virtual_source; // can be INVALID_FUNC_ID
+    
+    union {
+        func_id_t virtual_origin; // can be INVALID_FUNC_ID
+        func_id_t virtual_dispatcher; // can be INVALID_FUNC_ID
+    };
 
     #ifdef ADEPT_INSIGHT_BUILD
     source_t end_source;
@@ -84,9 +88,11 @@ typedef struct {
 #define AST_FUNC_DISALLOW               TRAIT_E
 #define AST_FUNC_VIRTUAL                TRAIT_F
 #define AST_FUNC_OVERRIDE               TRAIT_G
-#define AST_FUNC_DISPATCHER             TRAIT_2_1
-#define AST_FUNC_CLASS_CONSTRUCTOR      TRAIT_2_2
-#define AST_FUNC_WARN_BAD_PRINTF_FORMAT TRAIT_2_3
+#define AST_FUNC_USED_OVERRIDE          TRAIT_2_1
+#define AST_FUNC_NO_SUGGEST             TRAIT_2_2
+#define AST_FUNC_DISPATCHER             TRAIT_2_3
+#define AST_FUNC_CLASS_CONSTRUCTOR      TRAIT_2_4
+#define AST_FUNC_WARN_BAD_PRINTF_FORMAT TRAIT_2_5
 
 // ------------------ ast_func_prefixes_t ------------------
 // Information about the keywords that prefix a function
@@ -388,23 +394,25 @@ void ast_add_poly_func(ast_t *ast, weak_cstr_t func_name_persistent, func_id_t a
 
 // ---------------- ast_add_composite ----------------
 // Adds a composite to the global scope of an AST
+// NOTE: 'maybe_parent' may be 'AST_TYPE_NONE'
 ast_composite_t *ast_add_composite(
     ast_t *ast,
     strong_cstr_t name,
     ast_layout_t layout,
     source_t source,
-    const ast_type_t *maybe_parent,
+    ast_type_t maybe_parent,
     bool is_class
 );
 
 // ---------------- ast_add_poly_composite ----------------
 // Adds a polymorphic composite to the global scope of an AST
+// NOTE: 'maybe_parent' may be 'AST_TYPE_NONE'
 ast_poly_composite_t *ast_add_poly_composite(
     ast_t *ast,
     strong_cstr_t name,
     ast_layout_t layout,
     source_t source,
-    const ast_type_t *maybe_parent,
+    ast_type_t maybe_parent,
     bool is_class,
     strong_cstr_t *generics,
     length_t generics_length

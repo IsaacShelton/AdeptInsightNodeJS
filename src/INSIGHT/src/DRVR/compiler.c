@@ -769,6 +769,7 @@ void show_help(bool show_advanced_options){
     printf("    --dump            Dump AST, IAST, & IR to files\n");
     printf("    --llvmir          Show generated LLVM representation\n");
     printf("    --no-verification Don't verify backend output\n");
+    printf("    --no-result       Don't create final binary\n");
     #endif // ENABLE_DEBUG_FEATURES
 }
 
@@ -1133,8 +1134,15 @@ void compiler_undeclared_function(compiler_t *compiler, object_t *object, source
         goto success;
     } else {
         // Other functions have the same name
-        ast_type_t *arg_types = is_method ? &types[1] : types;
-        strong_cstr_t args_string = strong_cstr_empty_if_null(make_args_string(arg_types, NULL, arity, TRAIT_NONE));
+
+        strong_cstr_t args_string;
+        
+        if(is_method){
+            args_string = strong_cstr_empty_if_null(make_args_string(&types[1], NULL, arity - 1, TRAIT_NONE));
+        } else {
+            args_string = strong_cstr_empty_if_null(make_args_string(types, NULL, arity, TRAIT_NONE));
+        }
+
         strong_cstr_t gives_string = gives ? ast_type_str(gives) : NULL;
 
         if(is_method){
@@ -1173,7 +1181,7 @@ static errorcode_t method_subject_is_possible(compiler_t *compiler, object_t *ob
         #else
             ast_poly_catalog_t catalog;
             ast_poly_catalog_init(&catalog);
-            errorcode_t res = ir_gen_polymorphable(compiler, object, potential_subject, subject, &catalog);
+            errorcode_t res = ir_gen_polymorphable(compiler, object, potential_subject, subject, &catalog, false);
             ast_poly_catalog_free(&catalog);
             return res;
         #endif
@@ -1189,7 +1197,7 @@ func_id_list_t compiler_possibilities(compiler_t *compiler, object_t *object, we
     for(length_t id = 0; id != ast->funcs_length; id++){
         ast_func_t *func = &ast->funcs[id];
 
-        if(streq(func->name, name) && (func->traits & (AST_FUNC_VIRTUAL | AST_FUNC_OVERRIDE)) == TRAIT_NONE){
+        if(streq(func->name, name) && (func->traits & (AST_FUNC_VIRTUAL | AST_FUNC_OVERRIDE | AST_FUNC_NO_SUGGEST)) == TRAIT_NONE){
             if(methods_only_type_of_this){
                 if(!ast_func_is_method(func)) continue;
 

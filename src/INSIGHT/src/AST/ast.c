@@ -258,6 +258,7 @@ void ast_free_composites(ast_composite_t *composites, length_t composites_length
         ast_composite_t *composite = &composites[i];
 
         ast_layout_free(&composite->layout);
+        ast_type_free(&composite->parent);
         free(composite->name);
     }
 }
@@ -393,7 +394,10 @@ strong_cstr_t ast_func_head_str(ast_func_t *func){
     if(func->traits & AST_FUNC_FOREIGN){
         result = mallocandsprintf("foreign %s(%s)%s %s%s", func->name, args_string ? args_string : "", no_discard, return_type_string, disallow);
     } else {
-        result = mallocandsprintf("func %s(%s)%s %s%s", func->name, args_string ? args_string : "", no_discard, return_type_string, disallow);
+        weak_cstr_t maybe_dispatcher = func->traits & AST_FUNC_DISPATCHER ? "[[dispatcher]] " : "";
+        weak_cstr_t maybe_virtual = func->traits & AST_FUNC_VIRTUAL ? "virtual " : "";
+        weak_cstr_t maybe_override = func->traits & AST_FUNC_OVERRIDE ? "override " : "";
+        result = mallocandsprintf("%s%s%sfunc %s(%s)%s %s%s", maybe_dispatcher, maybe_virtual, maybe_override, func->name, args_string ? args_string : "", no_discard, return_type_string, disallow);
     }
 
     free(args_string);
@@ -910,7 +914,8 @@ void ast_func_create_template(ast_func_t *func, const ast_func_head_t *options){
     func->statements = (ast_expr_list_t){0};
     func->source = options->source;
     func->export_as = options->export_name;
-    func->virtual_source = INVALID_FUNC_ID;
+    func->virtual_origin = INVALID_FUNC_ID;
+    func->virtual_dispatcher = INVALID_FUNC_ID;
 
     #if ADEPT_INSIGHT_BUILD
     func->end_source = options->source;
@@ -1160,7 +1165,7 @@ ast_composite_t *ast_add_composite(
     strong_cstr_t name,
     ast_layout_t layout,
     source_t source,
-    const ast_type_t *maybe_parent,
+    ast_type_t maybe_parent,
     bool is_class
 ){
     expand((void**) &ast->composites, sizeof(ast_composite_t), ast->composites_length, &ast->composites_capacity, 1, 4);
@@ -1171,7 +1176,7 @@ ast_composite_t *ast_add_composite(
         .name = name,
         .layout = layout,
         .source = source,
-        .parent = maybe_parent ? ast_type_clone(maybe_parent) : (ast_type_t){0},
+        .parent = maybe_parent,
         .is_polymorphic = false,
         .is_class = is_class,
         .has_constructor = false,
@@ -1185,7 +1190,7 @@ ast_poly_composite_t *ast_add_poly_composite(
     strong_cstr_t name,
     ast_layout_t layout,
     source_t source,
-    const ast_type_t *maybe_parent,
+    ast_type_t maybe_parent,
     bool is_class,
     strong_cstr_t *generics,
     length_t generics_length
@@ -1198,7 +1203,7 @@ ast_poly_composite_t *ast_add_poly_composite(
         .name = name,
         .layout = layout,
         .source = source,
-        .parent = maybe_parent ? ast_type_clone(maybe_parent) : (ast_type_t){0},
+        .parent = maybe_parent,
         .is_polymorphic = true,
         .is_class = is_class,
         .has_constructor = false,
@@ -1244,7 +1249,7 @@ void va_args_inject_ast(compiler_t *compiler, ast_t *ast){
         };
 
         ast_layout_init_with_struct_fields(&layout, names, types, 1);
-        ast_add_composite(ast, strclone("va_list"), layout, NULL_SOURCE, NULL, false);
+        ast_add_composite(ast, strclone("va_list"), layout, NULL_SOURCE, AST_TYPE_NONE, false);
     } else {
         // Larger Intel x86_64 va_list
 
@@ -1270,7 +1275,7 @@ void va_args_inject_ast(compiler_t *compiler, ast_t *ast){
         };
         
         ast_layout_init_with_struct_fields(&layout, names, types, 1);
-        ast_add_composite(ast, strclone("va_list"), layout, NULL_SOURCE, NULL, false);
+        ast_add_composite(ast, strclone("va_list"), layout, NULL_SOURCE, AST_TYPE_NONE, false);
     }
 }
 
