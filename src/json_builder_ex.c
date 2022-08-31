@@ -60,7 +60,7 @@ void json_build_func_parameters(
         }
 
         if(arg_type_traits && arg_type_traits[i] & AST_FUNC_ARG_TYPE_TRAIT_POD){
-            json_builder_append(builder, " POD ");
+            json_builder_append(builder, "POD ");
         }
 
         strong_cstr_t s = ast_type_str(&arg_types[i]);
@@ -87,7 +87,9 @@ void json_build_func_parameters(
 void json_build_composite_definition(json_builder_t *builder, ast_composite_t *composite){
     json_builder_append(builder, "\"");
 
-    if(ast_layout_is_simple_struct(&composite->layout)){
+    if(composite->is_class){
+        json_builder_append(builder, "class ");
+    } else if(ast_layout_is_simple_struct(&composite->layout)){
         json_builder_append(builder, "struct ");
     } else if(ast_layout_is_simple_struct(&composite->layout)){
         json_builder_append(builder, "union ");
@@ -110,7 +112,6 @@ void json_build_composite_definition(json_builder_t *builder, ast_composite_t *c
         json_builder_append(builder, "> ");
     }
     
-
     json_builder_append_escaped(builder, composite->name);    
     json_builder_append(builder, " (");
 
