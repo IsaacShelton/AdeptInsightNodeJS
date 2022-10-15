@@ -36,14 +36,14 @@ static void add_function_alias_definition(json_builder_t *builder, compiler_t *c
 
     json_builder_append(builder, "\"");
     json_builder_append(builder, "func alias ");
-    json_builder_append(builder, falias->from);
+    json_builder_append_escaped(builder, falias->from);
 
     if(!falias->match_first_of_name){
         json_build_func_parameters(builder, NULL, falias->arg_types, NULL, NULL, falias->arity, falias->required_traits, NULL);
     }
     
     json_builder_append(builder, " => ");
-    json_builder_append(builder, falias->to);
+    json_builder_append_escaped(builder, falias->to);
 
     json_builder_append(builder, "\"");
 
