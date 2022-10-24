@@ -15,16 +15,16 @@ extern "C" {
 #include <stdbool.h>
 #include <stdio.h>
 
-#include "AST/ast_constant.h"
 #include "AST/ast_expr.h"
 #include "AST/ast_layout.h"
+#include "AST/ast_named_expression.h"
 #include "AST/ast_type.h"
 #include "AST/meta_directives.h"
 #include "BRIDGE/type_table.h"
 #include "UTIL/color.h"
 #include "UTIL/ground.h"
-#include "UTIL/trait.h"
 #include "UTIL/index_id_list.h"
+#include "UTIL/trait.h"
 
 struct compiler;
 
@@ -213,9 +213,7 @@ typedef struct {
     ast_alias_t *aliases;
     length_t aliases_length;
     length_t aliases_capacity;
-    ast_constant_t* constants;
-    length_t constants_length;
-    length_t constants_capacity;
+    ast_named_expression_list_t named_expressions;
     ast_global_t *globals;
     length_t globals_length;
     length_t globals_capacity;
@@ -269,26 +267,9 @@ void ast_free(ast_t *ast);
 void ast_free_functions(ast_func_t *functions, length_t functions_length);
 void ast_free_function_aliases(ast_func_alias_t *faliases, length_t length);
 void ast_free_composites(ast_composite_t *composites, length_t composites_length);
-void ast_free_constants(ast_constant_t *constants, length_t constants_length);
 void ast_free_aliases(ast_alias_t *aliases, length_t aliases_length);
 void ast_free_globals(ast_global_t *globals, length_t globals_length);
 void ast_free_enums(ast_enum_t *enums, length_t enums_length);
-
-// ---------------- ast_dump ----------------
-// Converts an AST to a string representation
-// and then dumps it to a file
-void ast_dump(ast_t *ast, const char *filename);
-
-// ---------------- ast_dump_* ----------------
-// Writes a specific part of an AST to a file
-void ast_dump_functions(FILE *file, ast_func_t *functions, length_t functions_length);
-void ast_dump_statement_list(FILE *file, ast_expr_list_t *statements, length_t indentation);
-void ast_dump_statements(FILE *file, ast_expr_t **statements, length_t length, length_t indentation);
-void ast_dump_composites(FILE *file, ast_composite_t *composites, length_t composites_length);
-void ast_dump_composite(FILE *file, ast_composite_t *composite, length_t additional_indentation);
-void ast_dump_composite_subfields(FILE *file, ast_layout_skeleton_t *skeleton, ast_field_map_t *field_map, ast_layout_endpoint_t parent_endpoint, length_t indentation);
-void ast_dump_globals(FILE *file, ast_global_t *globals, length_t globals_length);
-void ast_dump_enums(FILE *file, ast_enum_t *enums, length_t enums_length);
 
 // ---------------- ast_func_is_method ----------------
 // Returns whether an AST function is method-like
@@ -357,10 +338,6 @@ successful_t ast_enum_find_kind(ast_enum_t *ast_enum, const char *name, length_t
 // Finds an alias by name
 maybe_index_t ast_find_alias(ast_alias_t *aliases, length_t aliases_length, const char *alias);
 
-// ---------------- ast_find_constant ----------------
-// Finds a global constant expression by name
-maybe_index_t ast_find_constant(ast_constant_t *constants, length_t constants_length, const char *constant);
-
 // ---------------- ast_find_enum ----------------
 // Finds a enum expression by name
 maybe_index_t ast_find_enum(ast_enum_t *enums, length_t enums_length, const char *enum_name);
@@ -384,9 +361,9 @@ void ast_add_alias(ast_t *ast, strong_cstr_t name, ast_type_t strong_type, trait
 // Adds an enum to the global scope of an AST
 void ast_add_enum(ast_t *ast, weak_cstr_t name, weak_cstr_t *kinds, length_t length, source_t source);
 
-// ---------------- ast_add_global_constant ----------------
-// Adds a constant named expression to the global scope of an AST
-void ast_add_global_constant(ast_t *ast, ast_constant_t new_constant);
+// ---------------- ast_add_global_named_expression ----------------
+// Adds a named expression to the global scope of an AST
+void ast_add_global_named_expression(ast_t *ast, ast_named_expression_t named_expression);
 
 // ---------------- ast_add_poly_func ----------------
 // Adds a function to the list of polymorphic functions for an AST
@@ -435,11 +412,6 @@ void va_args_inject_ast(struct compiler *compiler, ast_t *ast);
 // Compares two 'ast_alias_t' structures.
 // Used for qsort()
 int ast_aliases_cmp(const void *a, const void *b);
-
-// ---------------- ast_constants_cmp ----------------
-// Compares two 'ast_constant_t' structures.
-// Used for qsort()
-int ast_constants_cmp(const void *a, const void *b);
 
 // ---------------- ast_enums_cmp ----------------
 // Compares two 'ast_enum_t' structures.

@@ -26,11 +26,11 @@ void free_strings(strong_cstr_t *list, length_t length){
     free(list);
 }
 
-strong_cstr_t strong_cstr_empty_if_null(strong_cstr_t string){
+strong_cstr_t strong_cstr_empty_if_null(maybe_null_strong_cstr_t string){
     return string ? string : strclone("");
 }
 
-strong_cstr_t string_to_escaped_string(char *array, length_t length, char escaped_quote){
+strong_cstr_t string_to_escaped_string(const char *array, length_t length, char escaped_quote){
     length_t put_index = 0;
     length_t special_characters = 0;
 
@@ -76,6 +76,44 @@ strong_cstr_t string_to_escaped_string(char *array, length_t length, char escape
     return string;
 }
 
+
+strong_cstr_t string_to_unescaped_string(const char *data, length_t length, length_t *out_length, string_unescape_error_t *out_error_cause){
+    strong_cstr_t output = malloc(length + 1);
+    length_t get = 0;
+    length_t put = 0;
+
+    while(get != length){
+        if(data[get] != '\\'){
+            output[put++] = data[get++];
+            continue;
+        }
+
+        switch(data[get + 1]){
+        case 'n': output[put++] = '\n';  break;
+        case 'r': output[put++] = '\r';  break;
+        case 't': output[put++] = '\t';  break;
+        case 'b': output[put++] = '\b';  break;
+        case '0': output[put++] = '\0';  break;
+        case '"': output[put++] = '"';   break;
+        case 'e': output[put++] = 0x1B;  break;
+        case '\'': output[put++] = '\''; break;
+        case '\\': output[put++] = '\\'; break;
+        default:
+            *out_error_cause = (string_unescape_error_t){
+                .relative_position = get,
+            };
+            free(output);
+            return NULL;
+        }
+
+        get += 2;
+    }
+
+    output[put] = '\0';
+    *out_length = put;
+    return output;
+}
+
 #ifdef ADEPT_INSIGHT_BUILD
 // (insight only)
 bool string_needs_escaping(weak_cstr_t string, char escaped_quote){
@@ -92,7 +130,7 @@ bool string_needs_escaping(weak_cstr_t string, char escaped_quote){
 }
 #endif // ADEPT_INSIGHT_BUILD
 
-length_t string_count_character(char string[], length_t length, char character){
+length_t string_count_character(const char *string, length_t length, char character){
     length_t count = 0;
     for(length_t i = 0; i != length; i++) if(string[i] == character) count++;
     return count;

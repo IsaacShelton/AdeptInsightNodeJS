@@ -12,8 +12,12 @@
 extern "C" {
 #endif
 
-#include "UTIL/ground.h"
+#include <stdbool.h>
+
+#include "AST/ast_expr_lean.h"
 #include "AST/ast_type.h"
+#include "UTIL/ground.h"
+#include "UTIL/trait.h"
 
 // =====================================================================
 // =                          ast_type_make_*                          =
@@ -52,11 +56,11 @@ ast_type_t ast_type_make_func_ptr(source_t source, ast_type_t *arg_types, length
 
 // ---------------- ast_type_make_generic_int ----------------
 // Creates a generic integer type (no syntactic equivalent - represents the type of an unsuffixed integer)
-ast_type_t ast_type_make_generic_int();
+ast_type_t ast_type_make_generic_int(void);
 
 // ---------------- ast_type_make_generic_float ----------------
 // Creates a generic floating point type (no syntactic equivalent - represents the type of an unsuffixed float)
-ast_type_t ast_type_make_generic_float();
+ast_type_t ast_type_make_generic_float(void);
 
 // =====================================================================
 // =                          ast_elem_*_make                          =

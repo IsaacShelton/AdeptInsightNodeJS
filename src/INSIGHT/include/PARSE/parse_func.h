@@ -6,8 +6,13 @@
 extern "C" {
 #endif
 
-#include "UTIL/ground.h"
+#include <stdbool.h>
+
+#include "AST/ast.h"
+#include "AST/ast_type_lean.h"
 #include "PARSE/parse_ctx.h"
+#include "UTIL/ground.h"
+#include "UTIL/trait.h"
 
 // ------------------ parse_func ------------------
 // Parses a function
@@ -69,6 +74,7 @@ errorcode_t parse_func_alias_args(parse_ctx_t *ctx, ast_type_t **out_arg_types, 
 // ------------------ parse_func_argument ------------------
 // Will collapse all [$#N] type elements to $#N
 void parse_collapse_polycount_var_fixed_arrays(ast_type_t *types, length_t length);
+void parse_collapse_polycount_var_fixed_arrays_for_type(ast_type_t *type);
 
 #ifdef __cplusplus
 }

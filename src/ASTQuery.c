@@ -107,17 +107,17 @@ static void add_alias_definition(json_builder_t *builder, ast_alias_t *alias){
     json_build_object_next(builder);
 }
 
-static void add_constant_definition(json_builder_t *builder, ast_constant_t *constant){
+static void add_named_expression_definition(json_builder_t *builder, ast_named_expression_t *named_expression){
     json_build_object_start(builder);
     json_build_object_key(builder, "name");
-    json_build_string(builder, constant->name);
+    json_build_string(builder, named_expression->name);
     json_build_object_next(builder);
     json_build_object_key(builder, "definition");
     json_builder_append(builder, "\"define ");
-    json_builder_append_escaped(builder, constant->name);
+    json_builder_append_escaped(builder, named_expression->name);
     json_builder_append(builder, " = ");
 
-    strong_cstr_t value = ast_expr_str(constant->expression);
+    strong_cstr_t value = ast_expr_str(named_expression->expression);
     json_builder_append_escaped(builder, value);
     free(value);
     json_builder_append(builder, "\"");
@@ -180,13 +180,13 @@ void build_ast(json_builder_t *builder, compiler_t *compiler, object_t *object){
         json_build_array_end(builder);
         json_build_object_next(builder);
 
-        json_build_object_key(builder, "constants");
+        json_build_object_key(builder, "namedExpressions");
         json_build_array_start(builder);
-        for(length_t i = 0; i < ast->constants_length; i++){
-            add_constant_definition(builder, &ast->constants[i]);
+        for(length_t i = 0; i < ast->named_expressions.length; i++){
+            add_named_expression_definition(builder, &ast->named_expressions.expressions[i]);
         }
 
-        if(ast->constants_length) json_builder_remove(builder, 1); // Remove trailing ','
+        if(ast->named_expressions.length) json_builder_remove(builder, 1); // Remove trailing ','
         json_build_array_end(builder);
     }
     json_build_object_end(builder);

@@ -6,11 +6,15 @@
 extern "C" {
 #endif
 
+#include <stdbool.h>
+
 #include "AST/ast.h"
-#include "LEX/lex.h"
-#include "UTIL/ground.h"
-#include "DRVR/object.h"
 #include "DRVR/compiler.h"
+#include "DRVR/object.h"
+#include "LEX/lex.h"
+#include "LEX/token.h"
+#include "UTIL/ground.h"
+#include "UTIL/trait.h"
 
 // ------------------ parse_ctx_t ------------------
 // A general container struct that holds general
@@ -82,7 +86,7 @@ bool parse_ctx_get_meta_else_allowed(parse_ctx_t *ctx, length_t at_ends_expected
 // ------------------ parse_eat ------------------
 // Eats a token with a given id, if the current token
 // doesn't match the given id, 'error' will be spit out
-// and 1 will be returned.
+// and FAILURE will be returned.
 // (NOTE: error can be NULL to indicate no error should be printed)
 errorcode_t parse_eat(parse_ctx_t *ctx, tokenid_t id, const char *error);
 

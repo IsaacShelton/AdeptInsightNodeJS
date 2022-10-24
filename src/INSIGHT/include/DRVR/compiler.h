@@ -21,9 +21,10 @@ extern "C" {
 #include "DRVR/config.h"
 #include "DRVR/object.h"
 #include "UTIL/ground.h"
-#include "UTIL/trait.h"
-#include "UTIL/string_list.h"
+#include "UTIL/index_id_list.h"
 #include "UTIL/string_builder.h"
+#include "UTIL/string_list.h"
+#include "UTIL/trait.h"
 
 // Possible compiler trait options
 #define COMPILER_SHOW_CONSOLE     TRAIT_1
@@ -174,11 +175,7 @@ void compiler_free_warnings(compiler_t *compiler);
 
 // ---------------- compiler_new_object ----------------
 // Generates a new object within the compiler
-object_t* compiler_new_object(compiler_t *compiler);
-
-// ---------------- compiler_final_words ----------------
-// Says any final notes the compiler has
-void compiler_final_words(compiler_t *compiler);
+object_t *compiler_new_object(compiler_t *compiler);
 
 // ---------------- parse_arguments ----------------
 // Configures a compiler based on program arguments.
@@ -194,6 +191,10 @@ void break_into_arguments(const char *s, int *out_argc, char ***out_argv);
 // Displays program help information
 void show_help(bool show_advanced_options);
 
+// ---------------- show_how_to_ignore_unused_variables ----------------
+// Displays information on how to ignore unused variables
+void show_how_to_ignore_unused_variables();
+
 // ---------------- show_version ----------------
 // Displays program version information
 void show_version(compiler_t *compiler);
@@ -204,7 +205,7 @@ void show_root(compiler_t *compiler);
 
 // ---------------- compiler_get_string ----------------
 // Gets the string identifier of the compiler
-strong_cstr_t compiler_get_string();
+strong_cstr_t compiler_get_string(void);
 
 // ---------------- compiler_add_user_linker_option ----------------
 // Adds user-supplied linker option

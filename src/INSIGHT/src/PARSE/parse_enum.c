@@ -2,6 +2,8 @@
 #include <stdlib.h>
 
 #include "AST/ast.h"
+#include "AST/ast_expr.h"
+#include "AST/ast_named_expression.h"
 #include "DRVR/compiler.h"
 #include "LEX/token.h"
 #include "PARSE/parse_ctx.h"
@@ -10,6 +12,7 @@
 #include "TOKEN/token_data.h"
 #include "UTIL/ground.h"
 #include "UTIL/string.h"
+#include "UTIL/trait.h"
 #include "UTIL/util.h"
 
 errorcode_t parse_enum(parse_ctx_t *ctx, bool is_foreign){
@@ -45,17 +48,8 @@ errorcode_t parse_enum(parse_ctx_t *ctx, bool is_foreign){
     if(is_foreign){
         // Automatically add defines so using the enum name is optional
         for(length_t i = 0; i != length; i++){
-            ast_expr_t *value;
-            ast_expr_create_enum_value(&value, name, kinds[i], source);
-
-            ast_constant_t auto_constant = (ast_constant_t){
-                .name = strclone(kinds[i]),
-                .expression = value,
-                .traits = TRAIT_NONE,
-                .source = source,
-            };
-
-            ast_add_global_constant(ctx->ast, auto_constant);
+            ast_expr_t *value = ast_expr_create_enum_value(name, kinds[i], source);
+            ast_add_global_named_expression(ctx->ast, ast_named_expression_create(strclone(kinds[i]), value, TRAIT_NONE, source));
         }
     }
 

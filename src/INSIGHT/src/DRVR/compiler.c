@@ -22,6 +22,7 @@
 #include "AST/TYPE/ast_type_identical.h"
 #include "AST/UTIL/string_builder_extensions.h"
 #include "AST/ast.h"
+#include "AST/ast_dump.h"
 #include "AST/ast_expr.h"
 #include "AST/ast_poly_catalog.h"
 #include "AST/ast_type.h"
@@ -45,7 +46,6 @@
 #include "BKEND/backend.h"
 #include "DBG/debug.h"
 #include "INFER/infer.h"
-#include "IR/ir.h"
 #include "IR/ir_module.h"
 #include "IRGEN/ir_gen.h"
 #include "IRGEN/ir_gen_polymorphable.h"
@@ -58,7 +58,6 @@
 errorcode_t compiler_run(compiler_t *compiler, int argc, char **argv){
     // A wrapper function around 'compiler_invoke'
     compiler_invoke(compiler, argc, argv);
-    compiler_final_words(compiler);
     return compiler->result_flags & COMPILER_RESULT_SUCCESS ? SUCCESS : FAILURE;
 }
 
@@ -324,76 +323,62 @@ void compiler_free_warnings(compiler_t *compiler){
     compiler->warnings_capacity = 0;
 }
 
-object_t* compiler_new_object(compiler_t *compiler){
+object_t *compiler_new_object(compiler_t *compiler){
     // NOTE: Returns pointer to object that the compiler itself will free when destroyed
 
-    // Manually manage resizing of objects list
-    if(compiler->objects_length == compiler->objects_capacity){
-        object_t **new_objects = malloc(sizeof(object_t*) * compiler->objects_length * 2);
-        memcpy(new_objects, compiler->objects, sizeof(object_t*) * compiler->objects_length);
-        free(compiler->objects);
-        compiler->objects = new_objects;
-        compiler->objects_capacity *= 2;
-    }
+    expand((void**) &compiler->objects, sizeof(object_t*), compiler->objects_length, &compiler->objects_capacity, 1, 4);
+    length_t next_object_index = compiler->objects_length;
 
-    // Allocate object on heap
-    compiler->objects[compiler->objects_length++] = malloc(sizeof(object_t));
+    object_t *object = malloc_init(object_t, {
+        .filename = NULL,
+        .full_filename = NULL,
+        .compilation_stage = COMPILATION_STAGE_NONE,
+        .index = next_object_index,
+        .traits = OBJECT_NONE,
+        .default_stdlib = NULL,
+        .current_namespace = NULL,
+        .current_namespace_length = 0,
+    });
 
-    // Fill in some default values
-    object_t *object = compiler->objects[compiler->objects_length - 1];
-    object->filename = NULL;
-    object->full_filename = NULL;
-    object->compilation_stage = COMPILATION_STAGE_NONE;
-    object->index = compiler->objects_length - 1;
-    object->traits = OBJECT_NONE;
-    object->default_stdlib = NULL;
-    object->current_namespace = NULL;
-    object->current_namespace_length = 0;
+    compiler->objects[compiler->objects_length++] = object;
     return object;
-}
-
-void compiler_final_words(compiler_t *compiler){
-    #ifndef ADEPT_INSIGHT_BUILD
-    
-    if(compiler->show_unused_variables_how_to_disable){
-        printf("\nIf you'd like to disable unused variables warnings, you can:\n");
-        printf("    * Prefix them with '_'\n");
-        printf("    * Add 'pragma ignore_unused' to your file\n");
-        printf("    * Pass '--ignore-unused' to the compiler\n");
-    }
-
-    #endif
 }
 
 errorcode_t parse_arguments(compiler_t *compiler, object_t *object, int argc, char **argv){
     int arg_index = 1;
 
     while(arg_index != argc){
-        if(argv[arg_index][0] == '-'){
-            if(streq(argv[arg_index], "-h") || streq(argv[arg_index], "--help")){
+        weak_cstr_t arg = argv[arg_index];
+
+        if(arg[0] == '-'){
+            if(streq(arg, "-h") || streq(arg, "--help")){
                 show_help(false);
                 compiler->result_flags |= COMPILER_RESULT_SUCCESS;
                 return ALT_FAILURE;
-            } else if(streq(argv[arg_index], "-H") || streq(argv[arg_index], "--help-advanced")){
+            } else if(streq(arg, "--how-to-ignore-unused") || streq(arg, "--how-to-ignore-unused-variables")){
+                show_how_to_ignore_unused_variables();
+                compiler->result_flags |= COMPILER_RESULT_SUCCESS;
+                return ALT_FAILURE;
+            } else if(streq(arg, "-H") || streq(arg, "--help-advanced")){
                 show_help(true);
                 compiler->result_flags |= COMPILER_RESULT_SUCCESS;
                 return ALT_FAILURE;
-            } else if(streq(argv[arg_index], "--update")){
+            } else if(streq(arg, "--update")){
                 #ifndef ADEPT_INSIGHT_BUILD
                 try_update_installation(&compiler->config, compiler->config_filename, NULL, NULL);
                 #endif
                 compiler->result_flags |= COMPILER_RESULT_SUCCESS;
                 return ALT_FAILURE;
-            } else if(streq(argv[arg_index], "-p") || streq(argv[arg_index], "--package")){
+            } else if(streq(arg, "-p") || streq(arg, "--package")){
                 compiler->traits |= COMPILER_MAKE_PACKAGE;
-            } else if(streq(argv[arg_index], "-o")){
+            } else if(streq(arg, "-o")){
                 if(arg_index + 1 == argc){
                     redprintf("Expected output filename after '-o' flag\n");
                     return FAILURE;
                 }
                 free(compiler->output_filename);
                 compiler->output_filename = strclone(argv[++arg_index]);
-            } else if(streq(argv[arg_index], "-n")){
+            } else if(streq(arg, "-n")){
                 if(arg_index + 1 == argc){
                     redprintf("Expected output name after '-n' flag\n");
                     return FAILURE;
@@ -401,170 +386,163 @@ errorcode_t parse_arguments(compiler_t *compiler, object_t *object, int argc, ch
 
                 free(compiler->output_filename);
                 compiler->output_filename = filename_local(object->filename, argv[++arg_index]);
-            } else if(streq(argv[arg_index], "-i") || streq(argv[arg_index], "--inflate")){
+            } else if(streq(arg, "-i") || streq(arg, "--inflate")){
                 compiler->traits |= COMPILER_INFLATE_PACKAGE;
-            } else if(streq(argv[arg_index], "-d")){
+            } else if(streq(arg, "-d")){
                 compiler->traits |= COMPILER_DEBUG_SYMBOLS;
-            } else if(streq(argv[arg_index], "-e")){
+            } else if(streq(arg, "-e")){
                 compiler->traits |= COMPILER_EXECUTE_RESULT;
-            } else if(streq(argv[arg_index], "-w")){
+            } else if(streq(arg, "-w")){
                 compiler->traits |= COMPILER_NO_WARN;
-            } else if(streq(argv[arg_index], "-Werror")){
+            } else if(streq(arg, "-Werror")){
                 compiler->traits |= COMPILER_WARN_AS_ERROR;
-            } else if(streq(argv[arg_index], "-Wshort") || streq(argv[arg_index], "--short-warnings")){
+            } else if(streq(arg, "-Wshort") || streq(arg, "--short-warnings")){
                 compiler->traits |= COMPILER_SHORT_WARNINGS;
-            } else if(streq(argv[arg_index], "-j")){
+            } else if(streq(arg, "-j")){
                 compiler->traits |= COMPILER_NO_REMOVE_OBJECT;
-            } else if(streq(argv[arg_index], "-c")){
+            } else if(streq(arg, "-c")){
                 compiler->traits |= COMPILER_NO_REMOVE_OBJECT | COMPILER_EMIT_OBJECT;
-            } else if(streq(argv[arg_index], "-Onothing")){
+            } else if(streq(arg, "-Onothing")){
                 compiler->optimization = OPTIMIZATION_ABSOLUTELY_NOTHING;
-            } else if(streq(argv[arg_index], "-O0")){
+            } else if(streq(arg, "-O0")){
                 compiler->optimization = OPTIMIZATION_NONE;
-            } else if(streq(argv[arg_index], "-O1")){
+            } else if(streq(arg, "-O1")){
                 compiler->optimization = OPTIMIZATION_LESS;
-            } else if(streq(argv[arg_index], "-O2")){
+            } else if(streq(arg, "-O2")){
                 compiler->optimization = OPTIMIZATION_DEFAULT;
-            } else if(streq(argv[arg_index], "-O3")){
+            } else if(streq(arg, "-O3")){
                 compiler->optimization = OPTIMIZATION_AGGRESSIVE;
-            } else if(streq(argv[arg_index], "--fussy")){
+            } else if(streq(arg, "--fussy")){
                 compiler->traits |= COMPILER_FUSSY;
-            } else if(streq(argv[arg_index], "-v") || streq(argv[arg_index], "--version")){
+            } else if(streq(arg, "-v") || streq(arg, "--version")){
                 show_version(compiler);
                 return FAILURE;
-            } else if (streq(argv[arg_index], "--root")){
+            } else if (streq(arg, "--root")){
                 show_root(compiler);
                 return FAILURE;
-            } else if(streq(argv[arg_index], "--no-undef")){
+            } else if(streq(arg, "--no-undef")){
                 compiler->traits |= COMPILER_NO_UNDEF;
-            } else if(streq(argv[arg_index], "--no-type-info") || streq(argv[arg_index], "--no-typeinfo")){
+            } else if(streq(arg, "--no-type-info") || streq(arg, "--no-typeinfo")){
                 compiler->traits |= COMPILER_NO_TYPEINFO;
-            } else if(streq(argv[arg_index], "--unsafe-meta")){
+            } else if(streq(arg, "--unsafe-meta")){
                 compiler->traits |= COMPILER_UNSAFE_META;
-            } else if(streq(argv[arg_index], "--unsafe-new")){
+            } else if(streq(arg, "--unsafe-new")){
                 compiler->traits |= COMPILER_UNSAFE_NEW;
-            } else if(streq(argv[arg_index], "--null-checks")){
+            } else if(streq(arg, "--null-checks")){
                 compiler->checks |= COMPILER_NULL_CHECKS;
-            } else if(streq(argv[arg_index], "--ignore-all")){
+            } else if(streq(arg, "--ignore-all")){
                 compiler->ignore |= COMPILER_IGNORE_ALL;
-            } else if(streq(argv[arg_index], "--ignore-deprecation")){
+            } else if(streq(arg, "--ignore-deprecation")){
                 compiler->ignore |= COMPILER_IGNORE_DEPRECATION;
-            } else if(streq(argv[arg_index], "--ignore-early-return")){
+            } else if(streq(arg, "--ignore-early-return")){
                 compiler->ignore |= COMPILER_IGNORE_EARLY_RETURN;
-            } else if(streq(argv[arg_index], "--ignore-obsolete")){
+            } else if(streq(arg, "--ignore-obsolete")){
                 compiler->ignore |= COMPILER_IGNORE_OBSOLETE;
-            } else if(streq(argv[arg_index], "--ignore-partial-support")){
+            } else if(streq(arg, "--ignore-partial-support")){
                 compiler->ignore |= COMPILER_IGNORE_PARTIAL_SUPPORT;
-            } else if(streq(argv[arg_index], "--ignore-unrecognized-directives")){
+            } else if(streq(arg, "--ignore-unrecognized-directives")){
                 compiler->ignore |= COMPILER_IGNORE_UNRECOGNIZED_DIRECTIVES;
-            } else if(streq(argv[arg_index], "--ignore-unused")){
+            } else if(streq(arg, "--ignore-unused")){
                 compiler->ignore |= COMPILER_IGNORE_UNUSED;
-            } else if(streq(argv[arg_index], "--pic")
-                   || streq(argv[arg_index], "-fPIC")
-                   || streq(argv[arg_index], "-fpic")){
+            } else if(streq(arg, "--pic")
+                   || streq(arg, "-fPIC")
+                   || streq(arg, "-fpic")){
                 // Accessibility versions of --PIC
-                warningprintf("Flag '%s' is not valid, assuming you meant to use --PIC\n", argv[arg_index]);
+                warningprintf("Flag '%s' is not valid, assuming you meant to use --PIC\n", arg);
                 compiler->use_pic = TROOLEAN_TRUE;
-            } else if(streq(argv[arg_index], "--PIC")){
+            } else if(streq(arg, "--PIC")){
                 compiler->use_pic = TROOLEAN_TRUE;
-            } else if(streq(argv[arg_index], "--noPIC")
-                   || streq(argv[arg_index], "--no-pic")
-                   || streq(argv[arg_index], "--nopic")
-                   || streq(argv[arg_index], "-fno-pic")
-                   || streq(argv[arg_index], "-fno-PIC")){
+            } else if(streq(arg, "--noPIC")
+                   || streq(arg, "--no-pic")
+                   || streq(arg, "--nopic")
+                   || streq(arg, "-fno-pic")
+                   || streq(arg, "-fno-PIC")){
                 // Accessibility versions of --no-PIC
-                warningprintf("Flag '%s' is not valid, assuming you meant to use --no-PIC\n", argv[arg_index]);
+                warningprintf("Flag '%s' is not valid, assuming you meant to use --no-PIC\n", arg);
                 compiler->use_pic = TROOLEAN_FALSE;
-            } else if(streq(argv[arg_index], "--no-PIC")){
+            } else if(streq(arg, "--no-PIC")){
                 compiler->use_pic = TROOLEAN_FALSE;
-            } else if(streq(argv[arg_index], "-lm")){
+            } else if(streq(arg, "-lm")){
                 // Accessibility versions of --libm
-                warningprintf("Flag '%s' is not valid, assuming you meant to use --libm\n", argv[arg_index]);
+                warningprintf("Flag '%s' is not valid, assuming you meant to use --libm\n", arg);
                 compiler->use_libm = true;
-            } else if(streq(argv[arg_index], "--libm")){
+            } else if(streq(arg, "--libm")){
                 compiler->use_libm = true;
-            } else if(streq(argv[arg_index], "--extract-import-order")){
+            } else if(streq(arg, "--extract-import-order")){
                 compiler->extract_import_order = true; 
-            } else if(strncmp(argv[arg_index], "-std=", 5) == 0){
-                compiler->default_stdlib = &argv[arg_index][5];
+            } else if(strncmp(arg, "-std=", 5) == 0){
+                compiler->default_stdlib = &arg[5];
                 compiler->traits |= COMPILER_FORCE_STDLIB;
-            } else if(strncmp(argv[arg_index], "--std=", 6) == 0){
-                compiler->default_stdlib = &argv[arg_index][6];
+            } else if(strncmp(arg, "--std=", 6) == 0){
+                compiler->default_stdlib = &arg[6];
                 compiler->traits |= COMPILER_FORCE_STDLIB;
-            } else if(streq(argv[arg_index], "--windowed") || streq(argv[arg_index], "-mwindows")){
+            } else if(streq(arg, "--windowed") || streq(arg, "-mwindows")){
                 compiler->traits |= COMPILER_WINDOWED;
-            } else if(streq(argv[arg_index], "--entry")){
+            } else if(streq(arg, "--entry")){
                 if(arg_index + 1 == argc){
                     redprintf("Expected entry point after '--entry' flag\n");
                     return FAILURE;
                 }
                 compiler->entry_point = argv[++arg_index];
-            } else if(streq(argv[arg_index], "--windows")){
+            } else if(streq(arg, "--windows")){
                 #ifndef _WIN32
                 printf("[-] Cross compiling for Windows x86_64\n");
                 compiler->cross_compile_for = CROSS_COMPILE_WINDOWS;
                 #endif
-            } else if(streq(argv[arg_index], "--macos")){
+            } else if(streq(arg, "--macos")){
                 #ifndef __APPLE__
                 printf("[-] Cross compiling for MacOS x86_64\n");
                 compiler->cross_compile_for = CROSS_COMPILE_MACOS;
                 #endif
-            } else if(streq(argv[arg_index], "--wasm32")){
+            } else if(streq(arg, "--wasm32")){
                 printf("[-] Cross compiling for WebAssembly\n");
                 printf("    (Adept is intended for true 64-bit architectures, some things may break!)\n");
                 compiler->cross_compile_for = CROSS_COMPILE_WASM32;
-            } else if(argv[arg_index][0] == '-' && (argv[arg_index][1] == 'L' || argv[arg_index][1] == 'l')){
+            } else if(arg[0] == '-' && (arg[1] == 'L' || arg[1] == 'l')){
                 // Forward argument to linker
-                compiler_add_user_linker_option(compiler, argv[arg_index]);
-            } else if(argv[arg_index][0] == '-' && argv[arg_index][1] == 'I'){
-                if(argv[arg_index][2] == '\0'){
+                compiler_add_user_linker_option(compiler, arg);
+            } else if(arg[0] == '-' && arg[1] == 'I'){
+                if(arg[2] == '\0'){
                     if(arg_index + 1 == argc){
                         redprintf("Expected search path after '-I' flag\n");
                         return FAILURE;
                     }
                     compiler_add_user_search_path(compiler, argv[++arg_index], NULL);
                 } else {
-                    compiler_add_user_search_path(compiler, &argv[arg_index][2], NULL);
+                    compiler_add_user_search_path(compiler, &arg[2], NULL);
                 }
             }
             
             #ifdef ENABLE_DEBUG_FEATURES //////////////////////////////////
-            else if(streq(argv[arg_index], "--stages")){
+            else if(streq(arg, "--stages")){
                 compiler->debug_traits |= COMPILER_DEBUG_STAGES;
-            } else if(streq(argv[arg_index], "--dump")){
+            } else if(streq(arg, "--dump")){
                 compiler->debug_traits |= COMPILER_DEBUG_DUMP;
-            } else if(streq(argv[arg_index], "--llvmir")){
+            } else if(streq(arg, "--llvmir")){
                 compiler->debug_traits |= COMPILER_DEBUG_LLVMIR;
-            } else if(streq(argv[arg_index], "--no-verification")){
+            } else if(streq(arg, "--no-verification")){
                 compiler->debug_traits |= COMPILER_DEBUG_NO_VERIFICATION;
-            } else if(streq(argv[arg_index], "--no-result")){
+            } else if(streq(arg, "--no-result")){
                 compiler->debug_traits |= COMPILER_DEBUG_NO_RESULT;
             }
 
             #endif // ENABLE_DEBUG_FEATURES ///////////////////////////////
 
             else {
-                redprintf("Invalid argument: %s\n", argv[arg_index]);
+                redprintf("Invalid argument: %s\n", arg);
                 return FAILURE;
             }
         } else if(object->filename == NULL){
             object->compilation_stage = COMPILATION_STAGE_FILENAME;
-            object->filename = malloc(strlen(argv[arg_index]) + 1);
-            strcpy(object->filename, argv[arg_index]);
+            object->filename = strclone(arg);
 
-            // Check that there aren't spaces in the filename
-            length_t filename_length = strlen(object->filename);
-            for(length_t c = 0; c != filename_length; c++){
-                if(object->filename[c] == ' '){
-                    redprintf("Filename cannot contain spaces! :\\\n");
-                    return FAILURE;
-                }
+            if(strchr(object->filename, ' ') != NULL){
+                redprintf("Filename cannot contain spaces! :\\\n");
+                return FAILURE;
             }
 
             if(access(object->filename, F_OK) == -1){
-                object->compilation_stage = COMPILATION_STAGE_NONE;
                 redprintf("Can't find file '%s'\n", object->filename);
-                free(object->filename);
                 return FAILURE;
             }
 
@@ -572,9 +550,7 @@ errorcode_t parse_arguments(compiler_t *compiler, object_t *object, int argc, ch
             object->full_filename = filename_absolute(object->filename);
 
             if(object->full_filename == NULL){
-                object->compilation_stage = COMPILATION_STAGE_NONE;
                 internalerrorprintf("Failed to get absolute path of filename '%s'\n", object->filename);
-                free(object->filename);
                 return FAILURE;
             }
         } else {
@@ -596,9 +572,7 @@ errorcode_t parse_arguments(compiler_t *compiler, object_t *object, int argc, ch
             object->full_filename = filename_absolute(object->filename);
 
             if(object->full_filename == NULL){
-                object->compilation_stage = COMPILATION_STAGE_NONE;
                 internalerrorprintf("Failed to get absolute path of filename '%s'\n", object->filename);
-                free(object->filename);
                 return FAILURE;
             }
         } else {
@@ -773,6 +747,13 @@ void show_help(bool show_advanced_options){
     #endif // ENABLE_DEBUG_FEATURES
 }
 
+void show_how_to_ignore_unused_variables(){
+    blueprintf("Choose one or more options to ignore unused variables:\n");
+    printf("  A.) prefix the variable with '_'              [single variable]\n");
+    printf("  B.) add 'pragma ignore_unused' to your file   [entire project]\n");
+    printf("  C.) pass '--ignore-unused' option             [entire project]\n");
+}
+
 void show_version(compiler_t *compiler){
     strong_cstr_t compiler_string = compiler_get_string();
     strong_cstr_t import_location = filename_adept_import(compiler->root, "");
@@ -825,7 +806,7 @@ void show_root(compiler_t *compiler){
     printf("%s\n", compiler->root);
 }
 
-strong_cstr_t compiler_get_string(){
+strong_cstr_t compiler_get_string(void){
     return mallocandsprintf("Adept %s - Built %s %s", ADEPT_VERSION_STRING, __DATE__, __TIME__);
 }
 

@@ -1,4 +1,5 @@
 
+#include <assert.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -273,26 +274,19 @@ void parse_func_solidify_constructor(ast_t *ast, ast_func_t *constructor, source
 
     optional_ast_expr_list_t inputs = (optional_ast_expr_list_t){
         .has = true,
-        .value = (ast_expr_list_t){
-            .expressions = malloc(sizeof(ast_expr_t*) * arity),
-            .length = arity,
-            .capacity = arity,
-        },
+        .value = ast_expr_list_create(arity),
     };
 
     for(length_t i = 0; i != arity; i++){
-        ast_expr_create_variable(&inputs.value.expressions[i], func->arg_names[i], NULL_SOURCE);
+        ast_expr_list_append_unchecked(&inputs.value, ast_expr_create_variable(func->arg_names[i], NULL_SOURCE));
+
         func->arg_type_traits[i] = AST_FUNC_ARG_TYPE_TRAIT_POD;
     }
 
-    ast_expr_t *declare_and_construct_stmt;
-    ast_expr_create_declaration(&declare_and_construct_stmt, EXPR_DECLARE, source, "$", ast_type_clone(&this_pointee_type_view), AST_EXPR_DECLARATION_POD, NULL, inputs);
+    ast_expr_t *declare_and_construct_stmt = ast_expr_create_declaration(EXPR_DECLARE, source, "$", ast_type_clone(&this_pointee_type_view), AST_EXPR_DECLARATION_POD, NULL, inputs);
 
-    ast_expr_t *return_value;
-    ast_expr_create_variable(&return_value, "$", NULL_SOURCE);
-
-    ast_expr_t *return_stmt;
-    ast_expr_create_return(&return_stmt, NULL_SOURCE, return_value, (ast_expr_list_t){0});
+    ast_expr_t *return_value = ast_expr_create_variable("$", NULL_SOURCE);
+    ast_expr_t *return_stmt = ast_expr_create_return(NULL_SOURCE, return_value, (ast_expr_list_t){0});
 
     ast_expr_list_append(&func->statements, declare_and_construct_stmt);
     ast_expr_list_append(&func->statements, return_stmt);
@@ -374,9 +368,9 @@ errorcode_t parse_func_body(parse_ctx_t *ctx, ast_func_t *func){
 
     if(parse_ignore_newlines(ctx, "Expected function body")) return FAILURE;
 
+    defer_scope_t defer_scope = defer_scope_create(NULL, NULL, TRAIT_NONE);
+
     ast_expr_list_t stmts;
-    defer_scope_t defer_scope;
-    defer_scope_init(&defer_scope, NULL, NULL, TRAIT_NONE);
 
     if(parse_ctx_peek(ctx) == TOKEN_ASSIGN){
         if(ast_type_is_void(&func->return_type)){
@@ -392,13 +386,12 @@ errorcode_t parse_func_body(parse_ctx_t *ctx, ast_func_t *func){
         ast_expr_t *return_expression;
         if(parse_expr(ctx, &return_expression)) return FAILURE;
 
-        ast_expr_list_init(&stmts, 1);
-        ast_expr_create_return(&stmts.statements[stmts.length++], return_expression->source, return_expression, (ast_expr_list_t){0});
+        stmts = ast_expr_list_create(1);
+        ast_expr_list_append(&stmts, ast_expr_create_return(return_expression->source, return_expression, (ast_expr_list_t){0}));
         goto success;
     }
 
-    // TODO: CLEANUP: Cleanup?
-    if(func->traits & AST_FUNC_DISALLOW && ctx->tokenlist->tokens[*ctx->i].id != TOKEN_BEGIN){
+    if(func->traits & AST_FUNC_DISALLOW && parse_ctx_peek(ctx) != TOKEN_BEGIN){
         // HACK:
         // Since we are expected to end on the last token we processed
         // we will need to go back a token
@@ -408,7 +401,7 @@ errorcode_t parse_func_body(parse_ctx_t *ctx, ast_func_t *func){
 
     if(parse_eat(ctx, TOKEN_BEGIN, "Expected '{' after function prototype")) return FAILURE;
 
-    ast_expr_list_init(&stmts, 16);
+    stmts = ast_expr_list_create(16);
     ctx->func = func;
 
     if(parse_stmts(ctx, &stmts, &defer_scope, PARSE_STMTS_STANDARD)){
@@ -440,6 +433,7 @@ errorcode_t parse_func_arguments(parse_ctx_t *ctx, ast_func_t *func){
 
     if(parse_ignore_newlines(ctx, "Expected '(' after function name")) return FAILURE;
 
+    // Add automatic `this` parameter if defined inside composite
     if(ctx->composite_association){
         if(func->traits & AST_FUNC_FOREIGN){
             compiler_panic(ctx->compiler, func->source, "Cannot declare foreign function inside of struct domain");
@@ -483,12 +477,12 @@ errorcode_t parse_func_arguments(parse_ctx_t *ctx, ast_func_t *func){
     }
     
     // Allow for no argument list
-    if(tokens[*i].id != TOKEN_OPEN) return SUCCESS;
-    (*i)++; // Eat '('
+    if(parse_eat(ctx, TOKEN_OPEN, NULL) != SUCCESS) return SUCCESS;
 
     // Allow polymorphic prerequisites for function arguments
     ctx->allow_polymorphic_prereqs = true;
 
+    // Parse parameters
     while(tokens[*i].id != TOKEN_CLOSE){
         if(parse_ignore_newlines(ctx, "Expected function argument")){
             parse_free_unbackfilled_arguments(func, backfill);
@@ -564,25 +558,24 @@ errorcode_t parse_func_argument(parse_ctx_t *ctx, ast_func_t *func, length_t cap
     if(func->arg_defaults)
         func->arg_defaults[func->arity + *backfill] = NULL;
     
-    if(tokens[*i].id == TOKEN_ELLIPSIS){
+    if(parse_eat(ctx, TOKEN_ELLIPSIS, NULL) == SUCCESS){
         // Alone ellipsis, used for c-style varargs
 
         if(*backfill != 0){
-            compiler_panic(ctx->compiler, sources[*i], "Expected type for previous arguments before ellipsis");
+            compiler_panic(ctx->compiler, sources[*i - 1], "Expected type for previous arguments before ellipsis");
             parse_free_unbackfilled_arguments(func, *backfill);
             return FAILURE;
         }
 
-        (*i)++;
         func->traits |= AST_FUNC_VARARG;
         *out_is_solid = false;
         return SUCCESS;
     }
 
-    // Argument name
+    // Parse argument name
     // TODO: CLEANUP: Cleanup this messy code
     if(func->traits & AST_FUNC_FOREIGN){
-        // If this is a foreign function, argument names are optional
+        // Parse argument name of foreign function declaration (argument names are optional)
 
         // Look ahead to see if word token is for type, or is for argument name
         length_t lookahead = *i;
@@ -590,8 +583,14 @@ errorcode_t parse_func_argument(parse_ctx_t *ctx, ast_func_t *func, length_t cap
 
         if(tokens[lookahead].id == TOKEN_WORD){
             lookahead++;
-            while(tokens[lookahead].id == TOKEN_NEWLINE) lookahead++;
-            if(tokens[lookahead].id != TOKEN_NEXT && tokens[lookahead].id != TOKEN_CLOSE) is_argument_name = true;
+
+            while(tokens[lookahead].id == TOKEN_NEWLINE){
+                lookahead++;
+            }
+
+            if(tokens[lookahead].id != TOKEN_NEXT && tokens[lookahead].id != TOKEN_CLOSE){
+                is_argument_name = true;
+            }
         }
 
         if(is_argument_name){
@@ -609,9 +608,14 @@ errorcode_t parse_func_argument(parse_ctx_t *ctx, ast_func_t *func, length_t cap
 
             maybe_null_strong_cstr_t arg_name = parse_take_word(ctx, "INTERNAL ERROR: Expected argument name while parsing foreign function declaration, will probably crash...");
             func->arg_names[func->arity + *backfill] = arg_name;
+        } else {
+            if(func->arg_names != NULL){
+                func->arg_names[func->arity + *backfill] = NULL;
+            }
         }
     } else {
-        // Otherwise, if this is a normal function, argument names are required
+        // Parse argument name for normal function definition (argument names are required)
+
         maybe_null_strong_cstr_t name = parse_take_word(ctx, "Expected argument name before argument type");
 
         if(name == NULL){
@@ -936,33 +940,41 @@ void parse_collapse_polycount_var_fixed_arrays(ast_type_t *types, length_t lengt
     // Will collapse all [$#N] type elements to $#N
 
     // TODO: CLEANUP: Cleanup?
-    for(length_t type_index = 0; type_index != length; type_index++){
-        ast_type_t *type = &types[type_index];
+    for(length_t i = 0; i != length; i++){
+        parse_collapse_polycount_var_fixed_arrays_for_type(&types[i]);
+    }
+}
 
-        for(length_t i = 0; i != type->elements_length; i++){
-            ast_elem_t *elem = type->elements[i];
+void parse_collapse_polycount_var_fixed_arrays_for_type(ast_type_t *type){
+    // Will collapse all [$#N] type elements to $#N
 
-            if(elem->id == AST_ELEM_VAR_FIXED_ARRAY){
-                ast_elem_var_fixed_array_t *var_fixed_array = (ast_elem_var_fixed_array_t*) elem;
+    for(length_t i = 0; i != type->elements_length; i++){
+        ast_elem_t *elem = type->elements[i];
 
-                if(var_fixed_array->length->id == EXPR_POLYCOUNT){
-                    ast_expr_polycount_t *old_polycount_expr = (ast_expr_polycount_t*) var_fixed_array->length;
-                    source_t source = old_polycount_expr->source;
+        if(elem->id == AST_ELEM_VAR_FIXED_ARRAY){
+            ast_elem_var_fixed_array_t *var_fixed_array = (ast_elem_var_fixed_array_t*) elem;
 
-                    // Take name
-                    strong_cstr_t name = old_polycount_expr->name;
-                    old_polycount_expr->name = NULL;
+            if(var_fixed_array->length->id == EXPR_POLYCOUNT){
+                ast_expr_polycount_t *old_polycount_expr = (ast_expr_polycount_t*) var_fixed_array->length;
+                source_t source = old_polycount_expr->source;
 
-                    // Delete old element
-                    ast_elem_free(type->elements[i]);
+                // Take name
+                strong_cstr_t name = old_polycount_expr->name;
+                old_polycount_expr->name = NULL;
 
-                    // Replace with unwrapped version
-                    ast_elem_polycount_t *new_elem = (ast_elem_polycount_t*) malloc(sizeof(ast_elem_polycount_t));
-                    new_elem->id = AST_ELEM_POLYCOUNT;
-                    new_elem->source = source;
-                    new_elem->name = name;
-                    type->elements[i] = (ast_elem_t*) new_elem;
-                }
+                // Delete old element
+                ast_elem_free(type->elements[i]);
+
+                // Replace with unwrapped version
+                ast_elem_polycount_t *new_elem = (ast_elem_polycount_t*) malloc(sizeof(ast_elem_polycount_t));
+
+                *new_elem = (ast_elem_polycount_t){
+                    .id =  AST_ELEM_POLYCOUNT,
+                    .source = source,
+                    .name = name,
+                };
+
+                type->elements[i] = (ast_elem_t*) new_elem;
             }
         }
     }

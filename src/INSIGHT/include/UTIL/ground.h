@@ -13,16 +13,16 @@ extern "C" {
 */
 
 // Release information
-#define ADEPT_VERSION_STRING    "2.7"
-#define ADEPT_VERSION_NUMBER    2.7
+#define ADEPT_VERSION_STRING    "2.8"
+#define ADEPT_VERSION_NUMBER    2.8
 #define ADEPT_VERSION_MAJOR     2
-#define ADEPT_VERSION_MINOR     7
+#define ADEPT_VERSION_MINOR     8
 #define ADEPT_VERSION_RELEASE   0
 #define ADEPT_VERSION_QUALIFIER ""
 
 // Previous stable version string
 // (only used by preview builds to ignore "new update" false positives)
-#define ADEPT_PREVIOUS_STABLE_VERSION_STRING "2.6"
+#define ADEPT_PREVIOUS_STABLE_VERSION_STRING "2.7"
 
 #define ADEPT_PACKAGE_MANAGER_SPEC_VERSION 1
 
@@ -140,7 +140,7 @@ inline lenstr_t cstr_to_lenstr(char *cstr){
 #define typecast(TYPE, VALUE) ((TYPE)(VALUE))
 
 // ---------------- streq ----------------
-// Returns whether two null-termianted strings are equal
+// Returns whether two null-terminated strings are equal
 // Equivalent to 'strcmp(STRING, VALUE) == 0)'
 #define streq(STRING, VALUE) (strcmp((STRING), (VALUE)) == 0)
 
@@ -150,6 +150,10 @@ void *bsearch_insertion(const void *key, const void *base, size_t num, size_t si
 
 // ---------------- NUM_ITEMS ----------------
 #define NUM_ITEMS(array) (sizeof (array) / sizeof *(array))
+
+// ---------------- malloc_init ----------------
+// Based on https://tia.mat.br/posts/2015/05/01/initializing_a_heap_allocated_structure_in_c.html
+#define malloc_init(TYPE, ...) (TYPE*) memclone((TYPE[]){ __VA_ARGS__ }, sizeof(TYPE))
 
 // ---------------- special characters ----------------
 #ifdef __APPLE__

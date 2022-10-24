@@ -13,13 +13,16 @@ extern "C" {
     ----------------------------------------------------------------------------
 */
 
+#include <stdbool.h>
+
+#include "AST/ast_type_lean.h"
+#include "UTIL/ground.h"
 #include "UTIL/list.h"
 #include "UTIL/trait.h"
-#include "AST/ast_type_lean.h"
 
 #ifndef ADEPT_INSIGHT_BUILD
-#include "IR/ir_value.h"
 #include "IR/ir_type.h"
+#include "IR/ir_value.h"
 #endif
 
 #define BRIDGE_VAR_UNDEF        TRAIT_1 // Variable is to be uninitialized
@@ -28,16 +31,17 @@ extern "C" {
 #define BRIDGE_VAR_STATIC       TRAIT_4 // Variable is to static (global-like)
 
 typedef struct {
-    weak_cstr_t name;        // name of the variable
-    ast_type_t *ast_type;    // AST type of the variable
+    weak_cstr_t name;
+    ast_type_t *ast_type;
 
-    index_id_t id;                 // ID of the variable within the function stack (only applies to non-static variables)
-    index_id_t static_id;          // ID of the variable as a static variable (only applies to static variables)
-    trait_t traits;          // traits of the variable
+    index_id_t id;           // ID of the variable within the function stack (only applies to non-static variables)
+    index_id_t static_id;    // ID of the variable as a static variable (only applies to static variables)
+    trait_t traits;
+    source_t source;
 
     #ifndef ADEPT_INSIGHT_BUILD
-    ir_type_t *ir_type;      // IR type of the variable
-    ir_value_t *anon_global; // Used for static variables
+    ir_type_t *ir_type;
+    ir_value_t *optional_anon_global;
     #endif
 } bridge_var_t;
 
@@ -46,6 +50,11 @@ typedef struct {
 // Actual names, ast_types and ir_types aren't owned
 typedef listof(bridge_var_t, variables) bridge_var_list_t;
 #define bridge_var_list_append(LIST, VALUE) list_append((LIST), (VALUE), bridge_var_t)
+
+// ---------------- bridge_scope_ref_list_t ----------------
+// A list of pointers to bridge scopes
+typedef listof(struct bridge_scope_t*, scopes) bridge_scope_ref_list_t;
+#define bridge_scope_ref_list_append(LIST, VALUE) list_append((LIST), (VALUE), struct bridge_scope_t*)
 
 // ---------------- bridge_scope_t ----------------
 // A variable scope that contains a list of variables
@@ -63,9 +72,7 @@ typedef struct bridge_scope_t {
     // or the child scopes. (Used for finding by id)
     length_t following_var_id;
 
-    struct bridge_scope_t **children;
-    length_t children_length;
-    length_t children_capacity;
+    bridge_scope_ref_list_t children;
 } bridge_scope_t;
 
 // ---------------- bridge_scope_init ----------------
@@ -95,10 +102,6 @@ bool bridge_scope_var_already_in_list(bridge_scope_t *scope, const char *name);
 // within the scope.
 // (NOTE: Minimum distance of 3 to count as near enough)
 const char* bridge_scope_var_nearest(bridge_scope_t *scope, const char *name);
-
-// ---------------- bridge_scope_var_nearest_inner ----------------
-// Inner recursive implementation of bridge_scope_var_nearest
-void bridge_scope_var_nearest_inner(bridge_scope_t *scope, const char *name, char **out_nearest_name, int *out_distance);
 
 // ---------------- bridge_var_list_nearest ----------------
 // Finds the nearest variable name to the given variable name

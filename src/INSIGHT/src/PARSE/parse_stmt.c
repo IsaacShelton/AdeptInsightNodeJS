@@ -3,8 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "AST/ast_constant.h"
 #include "AST/ast_expr.h"
+#include "AST/ast_named_expression.h"
 #include "AST/ast_type.h"
 #include "DRVR/compiler.h"
 #include "DRVR/object.h"
@@ -21,14 +21,15 @@
 #include "UTIL/string.h"
 #include "UTIL/trait.h"
 #include "UTIL/util.h"
+#include "UTIL/string_builder.h"
 
-void defer_scope_init(defer_scope_t *defer_scope, defer_scope_t *parent, weak_cstr_t label, trait_t traits){
-    defer_scope->list.statements = NULL;
-    defer_scope->list.length = 0;
-    defer_scope->list.capacity = 0;
-    defer_scope->parent = parent;
-    defer_scope->label = label;
-    defer_scope->traits = traits;
+defer_scope_t defer_scope_create(defer_scope_t *parent, weak_cstr_t label, trait_t traits){
+    return (defer_scope_t){
+        .list = (ast_expr_list_t){0},
+        .parent = parent,
+        .label = label,
+        .traits = traits,
+    };
 }
 
 void defer_scope_free(defer_scope_t *defer_scope){
@@ -37,10 +38,12 @@ void defer_scope_free(defer_scope_t *defer_scope){
 
 length_t defer_scope_total(defer_scope_t *defer_scope){
     length_t total = 0;
+
     while(defer_scope){
         total += defer_scope->list.length;
         defer_scope = defer_scope->parent;
     }
+
     return total;
 }
 
@@ -67,52 +70,54 @@ void defer_scope_rewind(defer_scope_t *defer_scope, ast_expr_list_t *stmt_list, 
     }
 }
 
+ast_expr_list_t defer_scope_unwind_completely(defer_scope_t *defer_scope){
+    ast_expr_list_t list = ast_expr_list_create(defer_scope_total(defer_scope));
+
+    defer_scope_fulfill(defer_scope, &list);
+
+    // Duplicate defer statements of ancestors
+    for(defer_scope_t *traverse = defer_scope->parent; traverse; traverse = traverse->parent){
+        defer_scope_fulfill_by_cloning(traverse, &list);
+    }
+
+    return list;
+}
+
 errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scope_t *defer_scope, trait_t mode){
     // NOTE: Outputs statements to stmt_list
     // NOTE: Ends on 'i' pointing to a '}' token
-    // NOTE: Even if this function returns 1, statements appended to stmt_list still must be freed
+    // NOTE: Even if this function returns FAILURE, statements appended to stmt_list still must be freed
 
     length_t *i = ctx->i;
     token_t *tokens = ctx->tokenlist->tokens;
     source_t *sources = ctx->tokenlist->sources;
-    source_t source;
 
-    source.index = 0;
-    source.object_index = ctx->object->index;
-    source.stride = 0;
+    source_t source = (source_t){
+        .index = 0,
+        .object_index = ctx->object->index,
+        .stride = 0,
+    };
 
-    while(tokens[*i].id != TOKEN_END){
+    while(parse_ctx_peek(ctx) != TOKEN_END){
         if(parse_ignore_newlines(ctx, "Unexpected expression termination")) return FAILURE;
+
         expand((void**) &stmt_list->statements, sizeof(ast_expr_t*), stmt_list->length, &stmt_list->capacity, 1, 8);
 
         // Parse a statement into the statement list
-        switch(tokens[*i].id){
+        switch(parse_ctx_peek(ctx)){
         case TOKEN_END:
             return SUCCESS;
         case TOKEN_RETURN: {
-                // TODO: CLEANUP: Refactor this
-
                 ast_expr_t *return_expression;
                 source = sources[(*i)++]; // Pass over return keyword
 
-                if(tokens[*i].id == TOKEN_NEWLINE) return_expression = NULL;
-                else if(parse_expr(ctx, &return_expression)) return FAILURE;
-
-                ast_expr_list_t last_minute;
-                last_minute.capacity = defer_scope_total(defer_scope);
-                last_minute.statements = malloc(last_minute.capacity * sizeof(ast_expr_t*));
-                last_minute.length = 0;
-
-                defer_scope_fulfill(defer_scope, &last_minute);
-
-                // Duplicate defer statements of ancestors
-                for(defer_scope_t *traverse = defer_scope->parent; traverse; traverse = traverse->parent){
-                    for(size_t r = traverse->list.length; r != 0; r--){
-                        last_minute.statements[last_minute.length++] = ast_expr_clone(traverse->list.statements[r - 1]);
-                    }
+                if(tokens[*i].id == TOKEN_NEWLINE){
+                    return_expression = NULL;
+                } else if(parse_expr(ctx, &return_expression)){
+                    return FAILURE;
                 }
 
-                ast_expr_create_return(&stmt_list->statements[stmt_list->length++], source, return_expression, last_minute);
+                ast_expr_list_append_unchecked(stmt_list, ast_expr_create_return(source, return_expression, defer_scope_unwind_completely(defer_scope)));
             }
             break;
         case TOKEN_STRING: {
@@ -127,27 +132,30 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                     return FAILURE;
                 }
 
-                stmt_list->statements[stmt_list->length++] = expression;
+                ast_expr_list_append_unchecked(stmt_list, expression);
             }
             break;
         case TOKEN_DEFINE:
-            if(parse_local_constant_declaration(ctx, stmt_list, sources[*i])) return FAILURE;
+            if(parse_local_named_expression_declaration(ctx, stmt_list, sources[*i])) return FAILURE;
             break;
         case TOKEN_WORD: {
                 source = sources[(*i)++]; // Read ahead to see what type of statement this is
 
-                switch(tokens[*i].id){
+                switch(parse_ctx_peek(ctx)){
                 case TOKEN_MAYBE:
-                    if(tokens[++(*i)].id == TOKEN_OPEN){
-                        (*i)++; if(parse_stmt_call(ctx, stmt_list, true)) return FAILURE;
+                    *i += 1;
+
+                    if(parse_eat(ctx, TOKEN_OPEN, NULL) == SUCCESS){
+                        if(parse_stmt_call(ctx, stmt_list, true)) return FAILURE;
                     } else {
                         // TODO: Have a better error message here
-                        parse_panic_token(ctx, sources[*i], tokens[*i].id, "Encountered unexpected token '%s' at beginning of statement");
+                        parse_panic_token(ctx, parse_ctx_peek_source(ctx), parse_ctx_peek(ctx), "Encountered unexpected token '%s' at beginning of statement");
                         return FAILURE;
                     }
                     break;
                 case TOKEN_OPEN:
-                    (*i)++; if(parse_stmt_call(ctx, stmt_list, false)) return FAILURE;
+                    *i += 1;
+                    if(parse_stmt_call(ctx, stmt_list, false)) return FAILURE;
                     break;
                 case TOKEN_WORD: case TOKEN_FUNC:
                 case TOKEN_STDCALL: case TOKEN_NEXT: case TOKEN_POD:
@@ -156,18 +164,18 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                 case TOKEN_POLYMORPH: /*polymorphic type*/ case TOKEN_COLON: /*experimental : type syntax*/
                 case TOKEN_POLYCOUNT: /*polymorphic count*/
                 case TOKEN_STRUCT: case TOKEN_PACKED: case TOKEN_UNION: /* anonymous composites */
-                    (*i)--; if(parse_stmt_declare(ctx, stmt_list)) return FAILURE;
+                    *i -= 1;
+                    if(parse_stmt_declare(ctx, stmt_list)) return FAILURE;
                     break;
                 case TOKEN_BRACKET_OPEN: /* ambiguous case between declaration and usage */
-                    (*i)--;
+                    *i -= 1;
                     if(parse_ambiguous_open_bracket(ctx, stmt_list)) return FAILURE;
                     break;
-                default: {
-                        // Assume mutable expression operation statement if not one of the above
-                        (*i)--;
-                        if(parse_mutable_expr_operation(ctx, stmt_list)) return FAILURE;
-                        break;
-                    }
+                default:
+                    // Assume mutable expression operation statement if not one of the above
+                    *i -= 1;
+                    if(parse_mutable_expr_operation(ctx, stmt_list)) return FAILURE;
+                    break;
                 }
             }
             break;
@@ -183,13 +191,15 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
             if(parse_onetime_conditional(ctx, stmt_list, defer_scope)) return FAILURE;
             break;
         case TOKEN_WHILE: case TOKEN_UNTIL: {
-                unsigned int conditional_type = tokens[*i].id;
-                source = sources[(*i)++];
+                unsigned int conditional_type = parse_ctx_peek(ctx);
+                source = parse_ctx_peek_source(ctx);
                 ast_expr_t *conditional = NULL;
                 trait_t stmts_mode;
                 maybe_null_weak_cstr_t label = NULL;
 
-                if(tokens[*i].id == TOKEN_BREAK || tokens[*i].id == TOKEN_CONTINUE){
+                *i += 1;
+
+                if(parse_ctx_peek(ctx) == TOKEN_BREAK || parse_ctx_peek(ctx) == TOKEN_CONTINUE){
                     // 'while continue' or 'until break' loop
                     unsigned int condition_break_or_continue = tokens[*i].id;
 
@@ -224,13 +234,8 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                     return FAILURE;
                 }
 
-                ast_expr_list_t while_stmt_list;
-                while_stmt_list.statements = malloc(sizeof(ast_expr_t*) * 4);
-                while_stmt_list.length = 0;
-                while_stmt_list.capacity = 4;
-
-                defer_scope_t while_defer_scope;
-                defer_scope_init(&while_defer_scope, defer_scope, label, BREAKABLE | CONTINUABLE);
+                ast_expr_list_t while_stmt_list = ast_expr_list_create(4);
+                defer_scope_t while_defer_scope = defer_scope_create(defer_scope, label, BREAKABLE | CONTINUABLE);
 
                 if(parse_stmts(ctx, &while_stmt_list, &while_defer_scope, stmts_mode)){
                     ast_expr_list_free(&while_stmt_list);
@@ -241,7 +246,11 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                 
                 defer_scope_free(&while_defer_scope);
                 
-                *i += (stmts_mode & PARSE_STMTS_SINGLE) ? (length_t) -1 : 1;
+                if(stmts_mode & PARSE_STMTS_SINGLE){
+                    *i -= 1;
+                } else {
+                    *i += 1;
+                }
 
                 if(conditional == NULL){
                     // 'while continue' or 'until break' loop
@@ -251,7 +260,7 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                     stmt->label = label;
                     stmt->value = NULL;
                     stmt->statements = while_stmt_list;
-                    stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
+                    ast_expr_list_append_unchecked(stmt_list, (ast_expr_t*) stmt);
                 } else {
                     // 'while <expr>' or 'until <expr>' loop
                     ast_expr_while_t *stmt = malloc(sizeof(ast_expr_while_t));
@@ -260,7 +269,7 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                     stmt->label = label;
                     stmt->value = conditional;
                     stmt->statements = while_stmt_list;
-                    stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
+                    ast_expr_list_append_unchecked(stmt_list, (ast_expr_t*) stmt);
                 }
             }
             break;
@@ -361,14 +370,8 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                     return FAILURE;
                 }
 
-                ast_expr_list_t each_in_stmt_list = (ast_expr_list_t){
-                    .statements = malloc(sizeof(ast_expr_t*) * 4),
-                    .length = 0,
-                    .capacity = 4,
-                };
-
-                defer_scope_t each_in_defer_scope;
-                defer_scope_init(&each_in_defer_scope, defer_scope, label, BREAKABLE | CONTINUABLE);
+                ast_expr_list_t each_in_stmt_list = ast_expr_list_create(4);
+                defer_scope_t each_in_defer_scope = defer_scope_create(defer_scope, label, BREAKABLE | CONTINUABLE);
 
                 if(parse_stmts(ctx, &each_in_stmt_list, &each_in_defer_scope, stmts_mode)){
                     ast_expr_list_free(&each_in_stmt_list);
@@ -383,7 +386,11 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
 
                 defer_scope_free(&each_in_defer_scope);
 
-                if(stmts_mode & PARSE_STMTS_SINGLE) (*i)--; else (*i)++;
+                if(stmts_mode & PARSE_STMTS_SINGLE){
+                    *i -= 1;
+                } else {
+                    *i += 1;
+                }
 
                 // 'each in list' or 'each in [array, length]
                 ast_expr_each_in_t *stmt = malloc(sizeof(ast_expr_each_in_t));
@@ -397,7 +404,7 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                 stmt->list = list_expr;
                 stmt->statements = each_in_stmt_list;
                 stmt->is_static = is_static;
-                stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
+                ast_expr_list_append_unchecked(stmt_list, (ast_expr_t*) stmt);
             }
             break;
         case TOKEN_REPEAT: {
@@ -408,12 +415,12 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                 maybe_null_weak_cstr_t idx_overload_name = NULL;
 
                 if(tokens[*i].id == TOKEN_WORD && tokens[*i + 1].id == TOKEN_COLON){
-                    label = tokens[*i].data; *i += 2;
+                    label = tokens[*i].data;
+                    *i += 2;
                 }
 
-                bool is_static = tokens[*i].id == TOKEN_STATIC;
-                if(is_static) *i += 1;
-                
+                bool is_static = (parse_eat(ctx, TOKEN_STATIC, NULL) == SUCCESS);
+
                 if(parse_expr(ctx, &limit)) return FAILURE;
 
                 if(parse_ignore_newlines(ctx, "Expected '{' or ',' after conditional expression")){
@@ -443,13 +450,8 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                     return FAILURE;
                 }
 
-                ast_expr_list_t repeat_stmt_list;
-                repeat_stmt_list.statements = malloc(sizeof(ast_expr_t*) * 4);
-                repeat_stmt_list.length = 0;
-                repeat_stmt_list.capacity = 4;
-
-                defer_scope_t repeat_defer_scope;
-                defer_scope_init(&repeat_defer_scope, defer_scope, label, BREAKABLE | CONTINUABLE);
+                ast_expr_list_t repeat_stmt_list = ast_expr_list_create(4);
+                defer_scope_t repeat_defer_scope = defer_scope_create(defer_scope, label, BREAKABLE | CONTINUABLE);
 
                 if(parse_stmts(ctx, &repeat_stmt_list, &repeat_defer_scope, stmts_mode)){
                     ast_expr_list_free(&repeat_stmt_list);
@@ -460,7 +462,11 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
 
                 defer_scope_free(&repeat_defer_scope);
 
-                if(stmts_mode & PARSE_STMTS_SINGLE) (*i)--; else (*i)++;
+                if(stmts_mode & PARSE_STMTS_SINGLE){
+                    *i -= 1;
+                } else {
+                    *i += 1;
+                }
 
                 ast_expr_repeat_t *stmt = malloc(sizeof(ast_expr_repeat_t));
                 stmt->id = EXPR_REPEAT;
@@ -470,12 +476,11 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                 stmt->statements = repeat_stmt_list;
                 stmt->is_static = is_static;
                 stmt->idx_overload_name = idx_overload_name;
-                stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
+                ast_expr_list_append_unchecked(stmt_list, (ast_expr_t*) stmt);
             }
             break;
         case TOKEN_DEFER: {
-                defer_scope_t defer_defer_scope;
-                defer_scope_init(&defer_defer_scope, defer_scope, NULL, TRAIT_NONE);
+                defer_scope_t defer_defer_scope = defer_scope_create(defer_scope, NULL, TRAIT_NONE);
 
                 (*i)++; // Skip over 'defer' keyword
                 if(parse_stmts(ctx, &defer_scope->list, &defer_defer_scope, PARSE_STMTS_SINGLE)){
@@ -488,16 +493,12 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
             }
             break;
         case TOKEN_DELETE: {
-                ast_expr_unary_t *stmt = malloc(sizeof(ast_expr_unary_t));
-                stmt->id = EXPR_DELETE;
-                stmt->source = sources[(*i)++];
+                source = sources[(*i)++];
 
-                if(parse_primary_expr(ctx, &stmt->value) != 0){
-                    free(stmt);
-                    return FAILURE;
-                }
+                ast_expr_t *value;
+                if(parse_primary_expr(ctx, &value)) return FAILURE;
 
-                stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
+                ast_expr_list_append_unchecked(stmt_list, ast_expr_create_unary(EXPR_DELETE, source, value));
             }
             break;
         case TOKEN_BREAK: {
@@ -509,14 +510,14 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                     stmt->label = tokens[(*i)++].data;
 
                     defer_scope_rewind(defer_scope, stmt_list, BREAKABLE, stmt->label);
-                    stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
+                    ast_expr_list_append_unchecked(stmt_list, (ast_expr_t*) stmt);
                 } else {
                     ast_expr_break_t *stmt = malloc(sizeof(ast_expr_break_t));
                     stmt->id = EXPR_BREAK;
                     stmt->source = sources[*i - 1];
 
                     defer_scope_rewind(defer_scope, stmt_list, BREAKABLE, NULL);
-                    stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
+                    ast_expr_list_append_unchecked(stmt_list, (ast_expr_t*) stmt);
                 }
             }
             break;
@@ -529,24 +530,27 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                     stmt->label = tokens[(*i)++].data;
 
                     defer_scope_rewind(defer_scope, stmt_list, CONTINUABLE, stmt->label);
-                    stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
+                    ast_expr_list_append_unchecked(stmt_list, (ast_expr_t*) stmt);
                 } else {
                     ast_expr_continue_t *stmt = malloc(sizeof(ast_expr_continue_t));
                     stmt->id = EXPR_CONTINUE;
                     stmt->source = sources[*i - 1];
 
                     defer_scope_rewind(defer_scope, stmt_list, CONTINUABLE, NULL);
-                    stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
+                    ast_expr_list_append_unchecked(stmt_list, (ast_expr_t*) stmt);
                 }
             }
             break;
         case TOKEN_FALLTHROUGH: {
                 ast_expr_fallthrough_t *stmt = malloc(sizeof(ast_expr_fallthrough_t));
-                stmt->id = EXPR_FALLTHROUGH;
-                stmt->source = sources[(*i)++];
+
+                *stmt = (ast_expr_fallthrough_t){
+                    .id = EXPR_FALLTHROUGH,
+                    .source = sources[(*i)++],
+                };
 
                 defer_scope_rewind(defer_scope, stmt_list, FALLTHROUGHABLE, NULL);
-                stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
+                ast_expr_list_append_unchecked(stmt_list, (ast_expr_t*) stmt);
             }
             break;
         case TOKEN_META:
@@ -554,29 +558,19 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
             break;
         case TOKEN_EXHAUSTIVE:
             *i += 1;
-            if(parse_ctx_peek(ctx) != TOKEN_SWITCH){
-                compiler_panic(ctx->compiler, parse_ctx_peek_source(ctx), "Expected 'switch' keyword after 'exhaustive' keyword");
-                return FAILURE;
-            }
-            
             if(parse_switch(ctx, stmt_list, defer_scope, true)) return FAILURE;
             break;
         case TOKEN_SWITCH:
             if(parse_switch(ctx, stmt_list, defer_scope, false)) return FAILURE;
             break;
         case TOKEN_VA_START: case TOKEN_VA_END: {
-                tokenid_t tokenid = parse_ctx_peek(ctx);
+                unsigned int expr_id = parse_ctx_peek(ctx) == TOKEN_VA_START ? EXPR_VA_START : EXPR_VA_END;
                 source = sources[(*i)++];
 
-                ast_expr_t *va_list_value;
-                if(parse_expr(ctx, &va_list_value)) return FAILURE;
+                ast_expr_t *value;
+                if(parse_expr(ctx, &value)) return FAILURE;
 
-                ast_expr_unary_t *stmt = malloc(sizeof(ast_expr_unary_t));
-                stmt->id = tokenid == TOKEN_VA_START ? EXPR_VA_START : EXPR_VA_END;
-                stmt->source = source;
-                stmt->value = va_list_value;
-
-                stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
+                ast_expr_list_append_unchecked(stmt_list, ast_expr_create_unary(expr_id, source, value));
             }
             break;
         case TOKEN_VA_COPY: {
@@ -585,39 +579,21 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
 
                 source = sources[(*i)++];
 
-                // Eat '('
-                if(parse_eat(ctx, TOKEN_OPEN, "Expected '(' after va_copy keyword")) return FAILURE;
-
-                ast_expr_t *va_list_destination;
-                if(parse_expr(ctx, &va_list_destination)) return FAILURE;
-
-                // Eat ','
-                if(parse_eat(ctx, TOKEN_NEXT, "Expected ',' after first parameter to va_arg")){
-                    ast_expr_free_fully(va_list_destination);
-                    return FAILURE;
-                }
+                ast_expr_t *dest_value = NULL;
+                ast_expr_t *src_value = NULL;
                 
-                ast_expr_t *va_list_source;
-                if(parse_expr(ctx, &va_list_source)){
-                    ast_expr_free_fully(va_list_destination);
-                    ast_expr_free_fully(va_list_source);
+                if( parse_eat(ctx, TOKEN_OPEN, "Expected '(' after va_copy keyword")           // Eat '('
+                 || parse_expr(ctx, &dest_value)                                               // Parse destination value
+                 || parse_eat(ctx, TOKEN_NEXT, "Expected ',' after first parameter to va_arg") // Eat ','
+                 || parse_expr(ctx, &src_value)                                                // Parse source value
+                 || parse_eat(ctx, TOKEN_CLOSE, "Expected ')' after va_arg parameters")        // Eat ')'
+                ){
+                    ast_expr_free_fully(dest_value);
+                    ast_expr_free_fully(src_value);
                     return FAILURE;
                 }
 
-                // Eat ')'
-                if(parse_eat(ctx, TOKEN_CLOSE, "Expected ')' after va_arg parameters")){
-                    ast_expr_free_fully(va_list_destination);
-                    ast_expr_free_fully(va_list_source);
-                    return FAILURE;
-                }
-
-                ast_expr_va_copy_t *stmt = malloc(sizeof(ast_expr_va_copy_t));
-                stmt->id = EXPR_VA_COPY;
-                stmt->source = source;
-                stmt->dest_value = va_list_destination;
-                stmt->src_value = va_list_source;
-
-                stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
+                ast_expr_list_append_unchecked(stmt_list, ast_expr_create_va_copy(source, dest_value, src_value));
             }
             break;
         case TOKEN_FOR: {
@@ -634,11 +610,11 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                 memset(&statements, 0, sizeof(ast_expr_list_t));
 
                 if(tokens[*i].id == TOKEN_WORD && tokens[*i + 1].id == TOKEN_COLON){
-                    label = tokens[*i].data; *i += 2;
+                    label = tokens[*i].data;
+                    *i += 2;
                 }
 
-                defer_scope_t for_defer_scope;
-                defer_scope_init(&for_defer_scope, defer_scope, label, BREAKABLE | CONTINUABLE);
+                defer_scope_t for_defer_scope = defer_scope_create(defer_scope, label, BREAKABLE | CONTINUABLE);
 
                 // Skip over 'for' keyword
                 (*i)++;
@@ -673,7 +649,7 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                 if(tokens[*i].id != TOKEN_NEXT && tokens[*i].id != TOKEN_BEGIN && tokens[*i].id != TOKEN_NEWLINE && tokens[*i].id != TOKEN_CLOSE){
                     // Put the 'after' statement directly in the defer statements of the 'for' loop
                     if(parse_stmts(ctx, &after, &for_defer_scope, PARSE_STMTS_SINGLE | PARSE_STMTS_NO_JOINING | PARSE_STMTS_PARENT_DEFER_SCOPE)){
-                        if(condition) ast_expr_free(condition);
+                        ast_expr_free(condition);
                         ast_exprs_free_fully(before.statements, before.length);
                         defer_scope_free(&for_defer_scope);
                         return FAILURE;
@@ -684,7 +660,7 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                 if(tokens[*i].id == TOKEN_CLOSE) (*i)++;
 
                 if(parse_ignore_newlines(ctx, "Expected '{' or ',' after conditional expression")){
-                    if(condition) ast_expr_free(condition);
+                    ast_expr_free(condition);
                     ast_exprs_free_fully(before.statements, before.length);
                     ast_exprs_free_fully(after.statements, after.length);
                     defer_scope_free(&for_defer_scope);
@@ -698,7 +674,7 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                 case TOKEN_NEXT:  stmts_mode = PARSE_STMTS_SINGLE;   break;
                 default:
                     compiler_panic(ctx->compiler, sources[*i - 1], "Expected '{' or ',' after beginning parts of 'for' loop");
-                    if(condition) ast_expr_free(condition);
+                    ast_expr_free(condition);
                     ast_exprs_free_fully(before.statements, before.length);
                     ast_exprs_free_fully(after.statements, after.length);
                     defer_scope_free(&for_defer_scope);
@@ -707,7 +683,7 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
                 
                 // Parse statements
                 if(parse_stmts(ctx, &statements, &for_defer_scope, stmts_mode)){
-                    if(condition) ast_expr_free(condition);
+                    ast_expr_free(condition);
                     ast_exprs_free_fully(before.statements, before.length);
                     ast_exprs_free_fully(after.statements, after.length);
                     defer_scope_free(&for_defer_scope);
@@ -716,17 +692,13 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
 
                 defer_scope_free(&for_defer_scope);
 
-                if(stmts_mode & PARSE_STMTS_SINGLE) (*i)--; else (*i)++;
+                if(stmts_mode & PARSE_STMTS_SINGLE){
+                    *i -= 1;
+                } else {
+                    *i += 1;
+                }
 
-                ast_expr_for_t *stmt = malloc(sizeof(ast_expr_for_t));
-                stmt->id = EXPR_FOR;
-                stmt->source = source;
-                stmt->label = label;
-                stmt->before = before;
-                stmt->after = after;
-                stmt->condition = condition;
-                stmt->statements = statements;
-                stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
+                ast_expr_list_append_unchecked(stmt_list, ast_expr_create_for(source, label, before, after, condition, statements));
             }
             break;
         case TOKEN_LLVM_ASM:
@@ -742,17 +714,21 @@ errorcode_t parse_stmts(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scop
 
         if(tokens[*i].id == TOKEN_TERMINATE_JOIN && !(mode & PARSE_STMTS_NO_JOINING)){
             // Bypass single statement flag by "joining" 2+ statements
-            (*i)++; continue;
+            (*i)++;
+            continue;
         }
 
         // Continue over newline token
         // TODO: INVESTIGATE: Investigate whether TOKEN_META #else/#elif should be having (*i)++ here
-        if(tokens[*i].id == TOKEN_NEWLINE || (tokens[*i].id == TOKEN_META && (streq(tokens[*i].data, "else") || streq(tokens[*i].data, "elif")))){
+        tokenid_t ending = tokens[*i].id;
+        const void *ending_data = tokens[*i].data;
+
+        if(ending == TOKEN_NEWLINE || (ending == TOKEN_META && (streq(ending_data, "else") || streq(ending_data, "elif")))){
             (*i)++;
-        } else if(tokens[*i].id != TOKEN_ELSE && tokens[*i].id != TOKEN_TERMINATE_JOIN && tokens[*i].id != TOKEN_CLOSE && tokens[*i].id != TOKEN_BEGIN && tokens[*i].id != TOKEN_NEXT){
-            parse_panic_token(ctx, sources[*i], tokens[*i].id, "Encountered unexpected token '%s' at end of statement");
+        } else if(ending != TOKEN_ELSE && ending != TOKEN_TERMINATE_JOIN && ending != TOKEN_CLOSE && ending != TOKEN_BEGIN && ending != TOKEN_NEXT){
+            parse_panic_token(ctx, sources[*i], ending, "Encountered unexpected token '%s' at end of statement");
             return FAILURE;
-        }    
+        }
 
         if(mode & PARSE_STMTS_SINGLE){
             if(!(mode & PARSE_STMTS_PARENT_DEFER_SCOPE)){
@@ -811,7 +787,7 @@ errorcode_t parse_stmt_call(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, bool i
 
         // If everything is successful, add the expression as a statement
         if(errorcode == SUCCESS){
-            stmt_list->statements[stmt_list->length++] = out_expr;
+            ast_expr_list_append_unchecked(stmt_list, out_expr);
         }
     }
 
@@ -915,14 +891,9 @@ errorcode_t parse_stmt_mid_declare(parse_ctx_t *ctx, ast_expr_list_t *stmt_list,
     for(length_t i = 0; i != length; i++){
         bool is_last = (i + 1 == length);
         ast_type_t type = is_last ? master_type : ast_type_clone(&master_type);
-        ast_expr_t *value = is_last ? initial_value : (initial_value ? ast_expr_clone(initial_value) : NULL);
+        ast_expr_t *value = is_last ? initial_value : ast_expr_clone_if_not_null(initial_value);
 
-        if(i != 0){
-            // Only one statement expected, so we have to make room for any additional ones
-            expand((void**) &stmt_list->statements, sizeof(ast_expr_t*), stmt_list->length, &stmt_list->capacity, 1, 8);
-        }
-
-        ast_expr_create_declaration(&stmt_list->statements[stmt_list->length++], declare_stmt_type, source_list[i], names[i], type, traits, value, inputs);
+        ast_expr_list_append(stmt_list, ast_expr_create_declaration(declare_stmt_type, source_list[i], names[i], type, traits, value, inputs));
     }
 
     return SUCCESS;
@@ -936,54 +907,44 @@ errorcode_t parse_switch(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_sco
     // switch <condition> { ... }
     //    ^
 
-    source_t source = ctx->tokenlist->sources[is_exhaustive ? *ctx->i - 1 : *ctx->i];
+    length_t beginning_index = *ctx->i - (is_exhaustive ? 1 : 0);
+    source_t source = ctx->tokenlist->sources[beginning_index];
 
-    if(parse_eat(ctx, TOKEN_SWITCH, "Expected 'switch' keyword when parsing switch statement"))
-        return FAILURE;
+    if(parse_eat(ctx, TOKEN_SWITCH, "Expected 'switch' keyword after 'exhaustive' keyword")) return FAILURE;
 
-    ast_expr_t *value;
-    if(parse_expr(ctx, &value)) return FAILURE;
-
+    ast_expr_t *value = NULL;
     ast_case_list_t cases = {0};
-
-    if(parse_ignore_newlines(ctx, "Expected '{' after value given to 'switch' statement")){
-        ast_expr_free_fully(value);
-        return FAILURE;
-    }
-    
-    if(parse_eat(ctx, TOKEN_BEGIN, "Expected '{' after value given to 'switch' statement")){
-        ast_expr_free_fully(value);
-        return FAILURE;
-    }
-
     ast_expr_list_t or_default = {0};
     ast_expr_list_t *list = &or_default;
-    defer_scope_t current_defer_scope;
+    defer_scope_t current_defer_scope = defer_scope_create(parent_defer_scope, NULL, FALLTHROUGHABLE);
 
-    if(parse_ignore_newlines(ctx, "Expected '}' before end of file")){
-        ast_expr_free_fully(value);
-        return FAILURE;
+    if( parse_expr(ctx, &value)
+     || parse_ignore_newlines(ctx, "Expected '{' after value given to 'switch' statement")
+     || parse_eat(ctx, TOKEN_BEGIN, "Expected '{' after value given to 'switch' statement")
+    ){
+        goto failure;
     }
 
-    unsigned int token_id = parse_ctx_peek(ctx);
-    bool failed = false;
+    while(true){
+        if(parse_ignore_newlines(ctx, "Expected '}' before end of file")) goto failure;
 
-    defer_scope_init(&current_defer_scope, parent_defer_scope, NULL, FALLTHROUGHABLE);
+        switch(parse_ctx_peek(ctx)){
+        case TOKEN_END:
+            goto no_more_statements;
+        case TOKEN_CASE: {
+                ast_expr_t *condition;
+                source_t case_source = parse_ctx_peek_source(ctx);
+                
+                if( parse_eat(ctx, TOKEN_CASE, "Expected 'case' keyword for switch case")
+                 || parse_expr(ctx, &condition)
+                 || parse_eat(ctx, TOKEN_NEXT, NULL) == ALT_FAILURE // Skip over ',' if present
+                ){
+                    goto failure;
+                }
 
-    while(token_id != TOKEN_END){
-        if(token_id == TOKEN_CASE){
-            ast_expr_t *condition;
-            source_t case_source = parse_ctx_peek_source(ctx);
-            failed = failed || parse_eat(ctx, TOKEN_CASE, "Expected 'case' keyword for switch case") || parse_expr(ctx, &condition);
-
-            // Skip over ',' if present
-            if(!failed && parse_ctx_peek(ctx) == TOKEN_NEXT) (*ctx->i)++;
-            failed = failed || parse_ignore_newlines(ctx, "Expected '}' before end of file");
-
-            if(!failed){
                 defer_scope_fulfill(&current_defer_scope, list);
                 defer_scope_free(&current_defer_scope);
-                defer_scope_init(&current_defer_scope, parent_defer_scope, NULL, FALLTHROUGHABLE);
+                current_defer_scope = defer_scope_create(parent_defer_scope, NULL, FALLTHROUGHABLE);
 
                 ast_case_t *newest_case = ast_case_list_append(&cases, (ast_case_t){
                     .condition = condition,
@@ -993,63 +954,55 @@ errorcode_t parse_switch(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_sco
 
                 list = &newest_case->statements;
             }
-        } else if(token_id == TOKEN_DEFAULT){
+            break;
+        case TOKEN_DEFAULT:
             defer_scope_fulfill(&current_defer_scope, list);
             defer_scope_free(&current_defer_scope);
-            defer_scope_init(&current_defer_scope, parent_defer_scope, NULL, TRAIT_NONE);
+            current_defer_scope = defer_scope_create(parent_defer_scope, NULL, TRAIT_NONE);
+
             list = &or_default;
+            is_exhaustive = false; // Disable exhaustive checking if default case is specified
 
-            failed = failed || parse_eat(ctx, TOKEN_DEFAULT, "Expected 'default' keyword for switch default case")
-                            || parse_ignore_newlines(ctx, "Expected '}' before end of file");
-            
-            // Disable exhaustive checking if default case is specified
-            is_exhaustive = false;
-        } else {
-            failed = failed || parse_stmts(ctx, list, &current_defer_scope, PARSE_STMTS_SINGLE | PARSE_STMTS_PARENT_DEFER_SCOPE)
-                            || parse_ignore_newlines(ctx, "Expected '}' before end of file");
+            if(parse_eat(ctx, TOKEN_DEFAULT, "Expected 'default' keyword for switch default case")){
+                goto failure;
+            }
+
+            break;
+        default:
+            if(parse_stmts(ctx, list, &current_defer_scope, PARSE_STMTS_SINGLE | PARSE_STMTS_PARENT_DEFER_SCOPE)){
+                goto failure;
+            }
         }
-
-        if(failed){
-            ast_expr_free_fully(value);
-            ast_case_list_free(&cases);
-            ast_expr_list_free(&or_default);
-            defer_scope_free(&current_defer_scope);
-            return FAILURE;
-        }
-
-        token_id = parse_ctx_peek(ctx);
     }
 
+no_more_statements:
+
     // Skip over '}'
-    (*ctx->i)++;
+    *ctx->i += 1;
 
     defer_scope_fulfill(&current_defer_scope, list);
     defer_scope_free(&current_defer_scope);
 
-    ast_expr_switch_t *switch_expr = malloc(sizeof(ast_expr_switch_t));
-    switch_expr->id = EXPR_SWITCH;
-    switch_expr->source = source;
-    switch_expr->value = value;
-    switch_expr->cases = cases;
-    switch_expr->or_default = or_default;
-    switch_expr->is_exhaustive = is_exhaustive;
-
-    // Append the created switch statement
-    stmt_list->statements[stmt_list->length++] = (ast_expr_t*) switch_expr;
+    ast_expr_list_append_unchecked(stmt_list, ast_expr_create_switch(source, value, cases, or_default, is_exhaustive));
     return SUCCESS;
+
+failure:
+    ast_expr_free_fully(value);
+    ast_case_list_free(&cases);
+    ast_expr_list_free(&or_default);
+    defer_scope_free(&current_defer_scope);
+    return FAILURE;
 }
 
 errorcode_t parse_conditionless_block(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, defer_scope_t *defer_scope){
     source_t source = ctx->tokenlist->sources[(*ctx->i)++];
 
-    ast_expr_list_t block_stmt_list;
-    ast_expr_list_init(&block_stmt_list, 4);
+    ast_expr_list_t block_stmt_list = ast_expr_list_create(4);
+    defer_scope_t block_defer_scope = defer_scope_create(defer_scope, NULL, TRAIT_NONE);
 
-    defer_scope_t block_defer_scope;
-    defer_scope_init(&block_defer_scope, defer_scope, NULL, TRAIT_NONE);
-
-    if(parse_stmts(ctx, &block_stmt_list, &block_defer_scope, PARSE_STMTS_STANDARD)
-    || parse_eat(ctx, TOKEN_END, "Expected '}' to close condition-less block")){
+    if( parse_stmts(ctx, &block_stmt_list, &block_defer_scope, PARSE_STMTS_STANDARD)
+     || parse_eat(ctx, TOKEN_END, "Expected '}' to close condition-less block")
+    ){
         ast_expr_list_free(&block_stmt_list);
         defer_scope_free(&block_defer_scope);
         return FAILURE;
@@ -1065,7 +1018,7 @@ errorcode_t parse_conditionless_block(parse_ctx_t *ctx, ast_expr_list_t *stmt_li
         .statements = block_stmt_list,
     };
 
-    stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
+    ast_expr_list_append_unchecked(stmt_list, (ast_expr_t*) stmt);
     return SUCCESS;
 }
 
@@ -1091,11 +1044,8 @@ errorcode_t parse_onetime_conditional(parse_ctx_t *ctx, ast_expr_list_t *stmt_li
         return FAILURE;
     }
 
-    ast_expr_list_t if_stmt_list;
-    ast_expr_list_init(&if_stmt_list, 4);
-
-    defer_scope_t if_defer_scope;
-    defer_scope_init(&if_defer_scope, defer_scope, NULL, TRAIT_NONE);
+    ast_expr_list_t if_stmt_list = ast_expr_list_create(4);
+    defer_scope_t if_defer_scope = defer_scope_create(defer_scope, NULL, TRAIT_NONE);
 
     if(parse_stmts(ctx, &if_stmt_list, &if_defer_scope, stmts_mode)){
         ast_expr_list_free(&if_stmt_list);
@@ -1106,11 +1056,15 @@ errorcode_t parse_onetime_conditional(parse_ctx_t *ctx, ast_expr_list_t *stmt_li
 
     defer_scope_free(&if_defer_scope);
 
-    if(!(stmts_mode & PARSE_STMTS_SINGLE)) (*i)++;
+    if(!(stmts_mode & PARSE_STMTS_SINGLE)){
+        *i += 1;
+    }
 
     // Read ahead of newlines to check for 'else'
     length_t i_readahead = *i;
-    while(tokens[i_readahead].id == TOKEN_NEWLINE && i_readahead != ctx->tokenlist->length) i_readahead++;
+    while(tokens[i_readahead].id == TOKEN_NEWLINE && i_readahead != ctx->tokenlist->length){
+        i_readahead++;
+    }
 
     if(tokens[i_readahead].id == TOKEN_ELSE){
         *i = i_readahead;
@@ -1118,30 +1072,33 @@ errorcode_t parse_onetime_conditional(parse_ctx_t *ctx, ast_expr_list_t *stmt_li
         switch(tokens[++(*i)].id){
         case TOKEN_NEXT:
             stmts_mode = PARSE_STMTS_SINGLE;
-            (*i)++; break;
+            *i += 1;
+            break;
         case TOKEN_BEGIN:
             stmts_mode = PARSE_STMTS_STANDARD;
-            (*i)++; break;
+            *i += 1;
+            break;
         default:
             stmts_mode = PARSE_STMTS_SINGLE;
         }
 
-        ast_expr_list_t else_stmt_list;
-        ast_expr_list_init(&else_stmt_list, 4);
+        ast_expr_list_t else_stmt_list = ast_expr_list_create(4);
+        defer_scope_t else_defer_scope = defer_scope_create(defer_scope, NULL, TRAIT_NONE);
 
-        // Reuse 'if_defer_scope' for else defer scope
-        defer_scope_init(&if_defer_scope, defer_scope, NULL, TRAIT_NONE);
-
-        if(parse_stmts(ctx, &else_stmt_list, &if_defer_scope, stmts_mode)){
+        if(parse_stmts(ctx, &else_stmt_list, &else_defer_scope, stmts_mode)){
             ast_expr_list_free(&else_stmt_list);
             ast_expr_free_fully(conditional);
-            defer_scope_free(&if_defer_scope);
+            defer_scope_free(&else_defer_scope);
             return FAILURE;
         }
 
-        defer_scope_free(&if_defer_scope);
+        defer_scope_free(&else_defer_scope);
 
-        if(stmts_mode & PARSE_STMTS_SINGLE) (*i)--; else (*i)++;
+        if(stmts_mode & PARSE_STMTS_SINGLE){
+            *i -= 1;
+        } else {
+            *i += 1;
+        }
 
         ast_expr_ifelse_t *stmt = malloc(sizeof(ast_expr_ifelse_t));
         stmt->id = (conditional_type == TOKEN_UNLESS) ? EXPR_UNLESSELSE : EXPR_IFELSE;
@@ -1150,16 +1107,19 @@ errorcode_t parse_onetime_conditional(parse_ctx_t *ctx, ast_expr_list_t *stmt_li
         stmt->value = conditional;
         stmt->statements = if_stmt_list;
         stmt->else_statements = else_stmt_list;
-        stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
+        ast_expr_list_append_unchecked(stmt_list, (ast_expr_t*) stmt);
     } else {
-        if(stmts_mode & PARSE_STMTS_SINGLE) (*i)--;
+        if(stmts_mode & PARSE_STMTS_SINGLE){
+            *i -= 1;
+        }
+
         ast_expr_if_t *stmt = malloc(sizeof(ast_expr_if_t));
         stmt->id = (conditional_type == TOKEN_UNLESS) ? EXPR_UNLESS : EXPR_IF;
         stmt->source = source;
         stmt->label = NULL;
         stmt->value = conditional;
         stmt->statements = if_stmt_list;
-        stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
+        ast_expr_list_append_unchecked(stmt_list, (ast_expr_t*) stmt);
     }
 
     return SUCCESS;
@@ -1168,7 +1128,7 @@ errorcode_t parse_onetime_conditional(parse_ctx_t *ctx, ast_expr_list_t *stmt_li
 errorcode_t parse_ambiguous_open_bracket(parse_ctx_t *ctx, ast_expr_list_t *stmt_list){
     // This function is used to disambiguate between the two following syntaxes:
     // variable[value] ... 
-    // vairable [value] Type
+    // variable [value] Type
 
     // And then injects the values along the way into the proper context
     // Must also handle cases like:
@@ -1192,8 +1152,7 @@ errorcode_t parse_ambiguous_open_bracket(parse_ctx_t *ctx, ast_expr_list_t *stmt
     length_t expr_source_list_length = 0;
     length_t expr_source_list_capacity = 4;
 
-    ast_expr_list_t expr_list;
-    ast_expr_list_init(&expr_list, 4);
+    ast_expr_list_t expr_list = ast_expr_list_create(4);
 
     // Parse ahead
     while(tokens[*i].id == TOKEN_BRACKET_OPEN){
@@ -1266,12 +1225,11 @@ errorcode_t parse_ambiguous_open_bracket(parse_ctx_t *ctx, ast_expr_list_t *stmt
         return parse_stmt_mid_declare(ctx, stmt_list, type, &word, &source, 1, traits);
     } else {
         // Turn encountered values into AST expression
-        ast_expr_t *mutable_expr;
-        ast_expr_create_variable(&mutable_expr, word, source);
+        ast_expr_t *mutable_expr = ast_expr_create_variable(word, source);
 
         for(length_t i = 0; i != expr_list.length; i++){
             ast_expr_t *index_expr = expr_list.statements[i];
-            ast_expr_create_access(&mutable_expr, mutable_expr, index_expr, expr_source_list[i]);
+            mutable_expr = ast_expr_create_access(mutable_expr, index_expr, expr_source_list[i]);
         }
 
         // Source list no longer needed
@@ -1293,8 +1251,7 @@ errorcode_t parse_ambiguous_open_bracket(parse_ctx_t *ctx, ast_expr_list_t *stmt
 errorcode_t parse_mutable_expr_operation(parse_ctx_t *ctx, ast_expr_list_t *stmt_list){
     ast_expr_t *mutable_expr;
     source_t source = parse_ctx_peek_source(ctx);
-    if(parse_expr(ctx, &mutable_expr)) return FAILURE;
-    return parse_mid_mutable_expr_operation(ctx, stmt_list, mutable_expr, source);
+    return parse_expr(ctx, &mutable_expr) || parse_mid_mutable_expr_operation(ctx, stmt_list, mutable_expr, source);
 }
 
 errorcode_t parse_mid_mutable_expr_operation(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, ast_expr_t *mutable_expr, source_t source){
@@ -1309,13 +1266,14 @@ errorcode_t parse_mid_mutable_expr_operation(parse_ctx_t *ctx, ast_expr_list_t *
     length_t *i = ctx->i;
     
     // For some expressions, bypass and treat as statement
-    if(mutable_expr->id == EXPR_CALL_METHOD
-            || mutable_expr->id == EXPR_POSTINCREMENT
-            || mutable_expr->id == EXPR_POSTDECREMENT
-            || mutable_expr->id == EXPR_PREINCREMENT
-            || mutable_expr->id == EXPR_PREDECREMENT
-            || mutable_expr->id == EXPR_TOGGLE){
-        stmt_list->statements[stmt_list->length++] = (ast_expr_t*) mutable_expr;
+    switch(mutable_expr->id){
+    case EXPR_CALL_METHOD:
+    case EXPR_POSTINCREMENT:
+    case EXPR_POSTDECREMENT:
+    case EXPR_PREINCREMENT:
+    case EXPR_PREDECREMENT:
+    case EXPR_TOGGLE:
+        ast_expr_list_append_unchecked(stmt_list, mutable_expr);
         return SUCCESS;
     }
 
@@ -1324,12 +1282,19 @@ errorcode_t parse_mid_mutable_expr_operation(parse_ctx_t *ctx, ast_expr_list_t *
 
     // Otherwise, it must be some type of assignment
     switch(id){
-    case TOKEN_ASSIGN: case TOKEN_ADD_ASSIGN:
-    case TOKEN_SUBTRACT_ASSIGN: case TOKEN_MULTIPLY_ASSIGN:
-    case TOKEN_DIVIDE_ASSIGN: case TOKEN_MODULUS_ASSIGN:
-    case TOKEN_BIT_AND_ASSIGN: case TOKEN_BIT_OR_ASSIGN: case TOKEN_BIT_XOR_ASSIGN:
-    case TOKEN_BIT_LSHIFT_ASSIGN: case TOKEN_BIT_RSHIFT_ASSIGN:
-    case TOKEN_BIT_LGC_LSHIFT_ASSIGN: case TOKEN_BIT_LGC_RSHIFT_ASSIGN:
+    case TOKEN_ASSIGN:
+    case TOKEN_ADD_ASSIGN:
+    case TOKEN_SUBTRACT_ASSIGN:
+    case TOKEN_MULTIPLY_ASSIGN:
+    case TOKEN_DIVIDE_ASSIGN:
+    case TOKEN_MODULUS_ASSIGN:
+    case TOKEN_BIT_AND_ASSIGN:
+    case TOKEN_BIT_OR_ASSIGN:
+    case TOKEN_BIT_XOR_ASSIGN:
+    case TOKEN_BIT_LSHIFT_ASSIGN:
+    case TOKEN_BIT_RSHIFT_ASSIGN:
+    case TOKEN_BIT_LGC_LSHIFT_ASSIGN:
+    case TOKEN_BIT_LGC_RSHIFT_ASSIGN:
         break;
     default:
         compiler_panic(ctx->compiler, sources[(*i) - 1], "Expected assignment operator after expression");
@@ -1337,11 +1302,7 @@ errorcode_t parse_mid_mutable_expr_operation(parse_ctx_t *ctx, ast_expr_list_t *
         return FAILURE;
     }
 
-    bool is_pod = false;
-    if(tokens[*i].id == TOKEN_POD){
-        is_pod = true;
-        (*i)++;
-    }
+    bool is_pod = (parse_eat(ctx, TOKEN_POD, NULL) == SUCCESS);
 
     if(!expr_is_mutable(mutable_expr)){
         compiler_panic(ctx->compiler, sources[*i], "Can't modify expression because it is immutable");
@@ -1357,15 +1318,15 @@ errorcode_t parse_mid_mutable_expr_operation(parse_ctx_t *ctx, ast_expr_list_t *
 
     unsigned int stmt_id;
     switch(id){
-    case TOKEN_ASSIGN:                stmt_id = EXPR_ASSIGN;          break;
-    case TOKEN_ADD_ASSIGN:            stmt_id = EXPR_ADD_ASSIGN;      break;
-    case TOKEN_SUBTRACT_ASSIGN:       stmt_id = EXPR_SUBTRACT_ASSIGN; break;
-    case TOKEN_MULTIPLY_ASSIGN:       stmt_id = EXPR_MULTIPLY_ASSIGN; break;
-    case TOKEN_DIVIDE_ASSIGN:         stmt_id = EXPR_DIVIDE_ASSIGN;   break;
-    case TOKEN_MODULUS_ASSIGN:        stmt_id = EXPR_MODULUS_ASSIGN;  break;
-    case TOKEN_BIT_AND_ASSIGN:        stmt_id = EXPR_AND_ASSIGN;      break;
-    case TOKEN_BIT_OR_ASSIGN:         stmt_id = EXPR_OR_ASSIGN;       break;
-    case TOKEN_BIT_XOR_ASSIGN:        stmt_id = EXPR_XOR_ASSIGN;      break;
+    case TOKEN_ASSIGN:                stmt_id = EXPR_ASSIGN;              break;
+    case TOKEN_ADD_ASSIGN:            stmt_id = EXPR_ADD_ASSIGN;          break;
+    case TOKEN_SUBTRACT_ASSIGN:       stmt_id = EXPR_SUBTRACT_ASSIGN;     break;
+    case TOKEN_MULTIPLY_ASSIGN:       stmt_id = EXPR_MULTIPLY_ASSIGN;     break;
+    case TOKEN_DIVIDE_ASSIGN:         stmt_id = EXPR_DIVIDE_ASSIGN;       break;
+    case TOKEN_MODULUS_ASSIGN:        stmt_id = EXPR_MODULUS_ASSIGN;      break;
+    case TOKEN_BIT_AND_ASSIGN:        stmt_id = EXPR_AND_ASSIGN;          break;
+    case TOKEN_BIT_OR_ASSIGN:         stmt_id = EXPR_OR_ASSIGN;           break;
+    case TOKEN_BIT_XOR_ASSIGN:        stmt_id = EXPR_XOR_ASSIGN;          break;
     case TOKEN_BIT_LSHIFT_ASSIGN:     stmt_id = EXPR_LSHIFT_ASSIGN;       break;
     case TOKEN_BIT_RSHIFT_ASSIGN:     stmt_id = EXPR_RSHIFT_ASSIGN;       break;
     case TOKEN_BIT_LGC_LSHIFT_ASSIGN: stmt_id = EXPR_LGC_LSHIFT_ASSIGN;   break;
@@ -1377,12 +1338,12 @@ errorcode_t parse_mid_mutable_expr_operation(parse_ctx_t *ctx, ast_expr_list_t *
         return FAILURE;
     }
 
-    ast_expr_create_assignment(&stmt_list->statements[stmt_list->length++], stmt_id, source, mutable_expr, value_expression, is_pod);
+    ast_expr_list_append_unchecked(stmt_list, ast_expr_create_assignment(stmt_id, source, mutable_expr, value_expression, is_pod));
     return SUCCESS;
 }
 
 errorcode_t parse_llvm_asm(parse_ctx_t *ctx, ast_expr_list_t *stmt_list){
-    // llvm_asm dialect { ... } "contraints" (values)
+    // llvm_asm dialect { ... } "constraints" (values)
     //    ^
 
     length_t *i = ctx->i;
@@ -1423,9 +1384,8 @@ errorcode_t parse_llvm_asm(parse_ctx_t *ctx, ast_expr_list_t *stmt_list){
         }
     }
 
-    strong_cstr_t assembly = NULL;
-    length_t assembly_length = 0;
-    length_t assembly_capacity = 0;
+    string_builder_t builder;
+    string_builder_init(&builder);
 
     if(parse_eat(ctx, TOKEN_BEGIN, "Expected '{' after llvm_asm dialect")) return FAILURE;
 
@@ -1433,115 +1393,102 @@ errorcode_t parse_llvm_asm(parse_ctx_t *ctx, ast_expr_list_t *stmt_list){
         switch(tokens[*i].id){
         case TOKEN_STRING: {
                 token_string_data_t *string_data = (token_string_data_t*) tokens[*i].data;
-                expand((void**) &assembly, sizeof(char), assembly_length, &assembly_capacity, string_data->length + 2, 512);
-                memcpy(&assembly[assembly_length], string_data->array, string_data->length);
-                assembly_length += string_data->length;
-                assembly[assembly_length++] = '\n';
-                assembly[assembly_length] = '\0';
+                string_builder_append_view(&builder, string_data->array, string_data->length);
+                string_builder_append_char(&builder, '\n');
             }
             break;
         case TOKEN_CSTRING: {
-                char *string = (char*) tokens[*i].data;
-                length_t length = strlen(string);
-                expand((void**) &assembly, sizeof(char), assembly_length, &assembly_capacity, length + 2, 512);
-                memcpy(&assembly[assembly_length], string, length);
-                assembly_length += length;
-                assembly[assembly_length++] = '\n';
-                assembly[assembly_length] = '\0';
+                string_builder_append(&builder, (const char*) tokens[*i].data);
+                string_builder_append_char(&builder, '\n');
             }
             break;
-        case TOKEN_NEXT: case TOKEN_NEWLINE:
+        case TOKEN_NEXT:
+        case TOKEN_NEWLINE:
             break;
         default:
             compiler_panicf(ctx->compiler, ctx->tokenlist->sources[*i], "Expected string or ',' while inside { ... } for inline LLVM assembly");
-            free(assembly);
+            string_builder_abandon(&builder);
             return FAILURE;
         }
         
         if(++(*i) == ctx->tokenlist->length){
             compiler_panicf(ctx->compiler, ctx->tokenlist->sources[*i], "Expected '}' for inline LLVM assembly before end-of-file");
+            string_builder_abandon(&builder);
             return FAILURE;
         }
     }
 
+    ast_expr_list_t args = {0};
+    strong_cstr_t assembly = string_builder_finalize(&builder);
     maybe_null_weak_cstr_t constraints = parse_grab_string(ctx, "Expected constraints string after '}' for llvm_asm");
+
+
     if(constraints == NULL){
         free(assembly);
         return FAILURE;
     }
 
     // Move past constraints string
-    (*i)++;
+    *i += 1;
 
     if(parse_eat(ctx, TOKEN_OPEN, "Expected '(' for beginning of LLVM assembly arguments")){
         free(assembly);
         return FAILURE;
     }
 
-    ast_expr_t **args = NULL;
-    length_t arity = 0;
-    length_t arity_capacity = 0;
-    ast_expr_t *arg;
 
     while(tokens[*i].id != TOKEN_CLOSE){
-        if(parse_ignore_newlines(ctx, "Expected argument to LLVM assembly") || parse_expr(ctx, &arg)){
-            ast_exprs_free_fully(args, arity);
-            free(assembly);
-            return FAILURE;
-        }
+        ast_expr_t *arg;
 
-        // Allocate room for more arguments if necessary
-        expand((void**) &args, sizeof(ast_expr_t*), arity, &arity_capacity, 1, 4);
-        args[arity++] = arg;
-        
-        if(parse_ignore_newlines(ctx, "Expected ',' or ')' after argument to LLVM assembly")){
-            ast_exprs_free_fully(args, arity);
-            free(assembly);
-            return FAILURE;
+        if( parse_ignore_newlines(ctx, "Expected argument to LLVM assembly")
+         || parse_expr(ctx, &arg)
+         || parse_ignore_newlines(ctx, "Expected ',' or ')' after argument to LLVM assembly")
+        ){
+            goto failure;
         }
+        
+        ast_expr_list_append(&args, arg);
 
         if(tokens[*i].id == TOKEN_NEXT){
             (*i)++;
         } else if(tokens[*i].id != TOKEN_CLOSE){
             compiler_panic(ctx->compiler, ctx->tokenlist->sources[*i], "Expected ',' or ')' after after argument to LLVM assembly");
-            ast_exprs_free_fully(args, arity);
-            free(assembly);
-            return FAILURE;
+            goto failure;
         }
     }
 
     // Move past closing ')'
-    (*i)++;
+    *i += 1;
 
     ast_expr_llvm_asm_t *stmt = malloc(sizeof(ast_expr_llvm_asm_t));
     stmt->id = EXPR_LLVM_ASM;
     stmt->source = source;
     stmt->assembly = strong_cstr_empty_if_null(assembly);
     stmt->constraints = constraints;
-    stmt->args = args;
-    stmt->arity = arity;
+    stmt->args = args.expressions;
+    stmt->arity = args.length;
     stmt->has_side_effects = has_side_effects;
     stmt->is_stack_align = is_stack_align;
     stmt->is_intel = (is_intel == TROOLEAN_TRUE);
-    stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
+    ast_expr_list_append_unchecked(stmt_list, (ast_expr_t*) stmt);
     return SUCCESS;
+
+failure:
+    ast_expr_list_free(&args);
+    free(assembly);
+    return FAILURE;
 }
 
-errorcode_t parse_local_constant_declaration(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, source_t source){
+errorcode_t parse_local_named_expression_declaration(parse_ctx_t *ctx, ast_expr_list_t *stmt_list, source_t source){
     // NOTE: Assumes 'stmt_list' has enough space for another statement
     // NOTE: expand() should've already been used on stmt_list to make room
-    
-    ast_constant_t constant;
 
-    // Parse constant
-    if(parse_constant_definition(ctx, &constant)) return FAILURE;
+    // Parse named expression
+    ast_named_expression_t named_expression;
+    if(parse_named_expression_definition(ctx, &named_expression)) return FAILURE;
 
-    // Turn into declare constant statement
-    ast_expr_declare_constant_t *stmt = malloc(sizeof(ast_expr_declare_constant_t));
-    stmt->id = EXPR_DECLARE_CONSTANT;
-    stmt->source = source;
-    stmt->constant = constant;
-    stmt_list->statements[stmt_list->length++] = (ast_expr_t*) stmt;
+    // Turn into declare named expression statement
+    ast_expr_list_append_unchecked(stmt_list, ast_expr_create_declare_named_expression(source, named_expression));
     return SUCCESS;
 }
 
