@@ -332,7 +332,7 @@ errorcode_t parse_meta(parse_ctx_t *ctx){
         }
         break;
     case META_DIRECTIVE_INPUT: {
-            char *definition_name = parse_grab_word(ctx, "Expected transcendent variable name after #set");
+            maybe_null_weak_cstr_t definition_name = parse_grab_word(ctx, "Expected transcendent variable name after #set");
             if(!definition_name) return FAILURE;
             (*i)++;
 
@@ -340,9 +340,10 @@ errorcode_t parse_meta(parse_ctx_t *ctx){
             fgets(input_str, 512, stdin);
             input_str[strcspn(input_str, "\n")] = '\0';
 
-            meta_expr_str_t *value = malloc(sizeof(meta_expr_str_t));
-            value->id = META_EXPR_STR;
-            value->value = strclone(input_str);
+            meta_expr_str_t *value = malloc_init(meta_expr_str_t, {
+                .id = META_EXPR_STR,
+                .value = strclone(input_str),
+            });
 
             meta_definition_t *existing = meta_definition_find(ctx->ast->meta_definitions, ctx->ast->meta_definitions_length, definition_name);
 
@@ -361,7 +362,7 @@ errorcode_t parse_meta(parse_ctx_t *ctx){
             if(parse_meta_expr(ctx, &value)) return FAILURE;
             if(meta_collapse(ctx->compiler, ctx->object, ctx->ast->meta_definitions, ctx->ast->meta_definitions_length, &value)) return FAILURE;
 
-            char *print_value = meta_expr_str(value);
+            strong_cstr_t print_value = meta_expr_str(value);
             printf("%s", print_value);
             free(print_value);
 
@@ -375,7 +376,7 @@ errorcode_t parse_meta(parse_ctx_t *ctx){
             if(parse_meta_expr(ctx, &value)) return FAILURE;
             if(meta_collapse(ctx->compiler, ctx->object, ctx->ast->meta_definitions, ctx->ast->meta_definitions_length, &value)) return FAILURE;
 
-            char *print_value = meta_expr_str(value);
+            strong_cstr_t print_value = meta_expr_str(value);
             redprintf("%s", print_value);
             free(print_value);
 
@@ -389,7 +390,7 @@ errorcode_t parse_meta(parse_ctx_t *ctx){
             if(parse_meta_expr(ctx, &value)) return FAILURE;
             if(meta_collapse(ctx->compiler, ctx->object, ctx->ast->meta_definitions, ctx->ast->meta_definitions_length, &value)) return FAILURE;
 
-            char *print_value = meta_expr_str(value);
+            strong_cstr_t print_value = meta_expr_str(value);
             yellowprintf("%s", print_value);
             free(print_value);
 
@@ -536,7 +537,7 @@ errorcode_t parse_meta(parse_ctx_t *ctx){
             if(parse_meta_expr(ctx, &value)) return FAILURE;
             if(meta_collapse(ctx->compiler, ctx->object, ctx->ast->meta_definitions, ctx->ast->meta_definitions_length, &value)) return FAILURE;
 
-            char *print_value = meta_expr_str(value);
+            strong_cstr_t print_value = meta_expr_str(value);
             compiler_warnf(ctx->compiler, source, "%s", print_value);
             free(print_value);
 
