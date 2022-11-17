@@ -5,7 +5,6 @@ Module['onRuntimeInitialized'] = function() {
     is_wasm_initialized = true;
     if (!Module["noFSInit"] && !FS.init.initialized) FS.init();
     TTY.init();
-    preMain();
 };
 
 function invokeInsight(query_json_string){
