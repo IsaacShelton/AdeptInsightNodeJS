@@ -75,8 +75,8 @@ void json_builder_append(json_builder_t *builder, weak_cstr_t string){
 }
 
 void json_builder_append_escaped(json_builder_t *builder, weak_cstr_t string){
-    if(string_needs_escaping(string, 0x00)){
-        strong_cstr_t escaped = string_to_escaped_string(string, strlen(string), 0x00);
+    if(string_needs_escaping(string, '\"')){
+        strong_cstr_t escaped = string_to_escaped_string(string, strlen(string), '\"', false);
         json_builder_append(builder, escaped);
         free(escaped);
     } else {
