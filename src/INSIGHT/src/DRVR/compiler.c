@@ -88,9 +88,7 @@ void compiler_invoke(compiler_t *compiler, int argc, char **argv){
 
     #ifdef __linux__
 
-    // Avoid using calloc so as not to interfere with TRACK_MEMORY_USAGE
-    compiler->location = malloc(PATH_MAX + 1);
-    memset(compiler->location, 0, PATH_MAX + 1);
+    compiler->location = calloc(1, PATH_MAX + 1);
 
     if(readlink("/proc/self/exe", compiler->location, PATH_MAX) < 0){
         // We failed to locate ourself using /proc/self/exe
@@ -253,10 +251,6 @@ void compiler_init(compiler_t *compiler){
 }
 
 void compiler_free(compiler_t *compiler){
-    #ifdef TRACK_MEMORY_USAGE
-    memory_sort();
-    #endif // TRACK_MEMORY_USAGE
-
     free(compiler->location);
     free(compiler->root);
     free(compiler->output_filename);
@@ -1113,6 +1107,10 @@ void compiler_undeclared_function(compiler_t *compiler, object_t *object, source
             free(subject);
         } else {
             compiler_panicf(compiler, source, "Undeclared function '%s'", name);
+
+            if(streq(name, "__assertion_failed__")){
+                printf("\nDo you mean to use the standard failed-assertion handlers? `import assertions`\n");
+            }
         }
         goto success;
     } else {

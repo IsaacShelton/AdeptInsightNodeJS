@@ -354,7 +354,7 @@ typedef struct {
 // Expressions that conditionally execute code found in a single block
 typedef struct {
     DERIVE_AST_EXPR;
-    weak_cstr_t label;
+    maybe_null_weak_cstr_t label;
     ast_expr_t *value;
     ast_expr_list_t statements;
 } ast_expr_conditional_t,
@@ -365,7 +365,7 @@ typedef struct {
 // Expressions that conditionally execute code found in a two blocks
 typedef struct {
     DERIVE_AST_EXPR;
-    weak_cstr_t label;
+    maybe_null_weak_cstr_t label;
     ast_expr_t *value;
     ast_expr_list_t statements;
     ast_expr_list_t else_statements;
@@ -379,6 +379,14 @@ typedef struct {
     DERIVE_AST_EXPR;
     ast_expr_list_t statements;
 } ast_expr_conditionless_block_t;
+
+// ---------------- ast_expr_assert_t ----------------
+// An assertion statement
+typedef struct {
+    DERIVE_AST_EXPR;
+    ast_expr_t *assertion;
+    ast_expr_t *message;
+} ast_expr_assert_t;
 
 // ---------------- ast_expr_each_in_t ----------------
 // Expression for 'each in' loop. Used for iterating
@@ -403,7 +411,7 @@ typedef struct {
     weak_cstr_t label;
     ast_expr_t *limit;
     ast_expr_list_t statements;
-    maybe_null_weak_cstr_t idx_overload_name;
+    maybe_null_weak_cstr_t idx_name;
     bool is_static;
 } ast_expr_repeat_t;
 
@@ -630,7 +638,11 @@ ast_expr_t *ast_expr_create_polycount(source_t source, strong_cstr_t name);
 // ---------------- ast_expr_create_va_copy ----------------
 // Creates a va_copy statement
 ast_expr_t *ast_expr_create_va_copy(source_t source, ast_expr_t *dest_value, ast_expr_t *src_value);
-                
+
+// ---------------- ast_expr_create_simple_conditional ----------------
+// Creates an simple conditional (if or unless) statement
+ast_expr_t *ast_expr_create_simple_conditional(source_t source, unsigned int conditional_type, maybe_null_weak_cstr_t label, ast_expr_t *condition, ast_expr_list_t statements);
+
 // ---------------- ast_expr_create_for ----------------
 // Creates a for-loop statement
 ast_expr_t *ast_expr_create_for(source_t source, weak_cstr_t label, ast_expr_list_t before, ast_expr_list_t after, ast_expr_t *condition, ast_expr_list_t statements);
@@ -659,6 +671,11 @@ ast_expr_t *ast_expr_create_switch(source_t source, ast_expr_t *value, ast_case_
 // ---------------- ast_expr_create_declare_named_expression ----------------
 // Creates a declare-named-expression statement
 ast_expr_t *ast_expr_create_declare_named_expression(source_t source, ast_named_expression_t named_expression);
+
+// ---------------- ast_expr_create_declare_named_expression ----------------
+// Creates a declare-named-expression statement
+ast_expr_t *ast_expr_create_assert(source_t source, ast_expr_t *assertion);
+
 
 // ---------------- ast_expr_list_create ----------------
 // Creates an ast_expr_list_t with a given capacity

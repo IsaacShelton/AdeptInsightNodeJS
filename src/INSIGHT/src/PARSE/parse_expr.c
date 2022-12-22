@@ -481,6 +481,7 @@ static tokenid_t parse_expr_has_terminating_token(tokenid_t id){
     case TOKEN_EACH:
     case TOKEN_ELSE:
     case TOKEN_EXHAUSTIVE:
+    case TOKEN_FALLTHROUGH:
     case TOKEN_FOR:
     case TOKEN_IF:
     case TOKEN_REPEAT:
@@ -887,7 +888,7 @@ int parse_expr_func_address(parse_ctx_t *ctx, ast_expr_t **out_expr){
         (*i)++;
 
         while(*i != ctx->tokenlist->length && tokens[*i].id != TOKEN_CLOSE){
-            grow((void*) &args, sizeof(ast_type_t), arity, arity + 1);
+            grow((void**) &args, sizeof(ast_type_t), arity + 1);
 
             if(parse_ignore_newlines(ctx, "Expected function argument") || parse_type(ctx, &arg_type)){
                 ast_types_free_fully(args, arity);
