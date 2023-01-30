@@ -21,6 +21,7 @@ extern "C" {
 #include "UTIL/datatypes.h"
 #include "UTIL/ground.h"
 #include "UTIL/list.h"
+#include "UTIL/string_list.h"
 #include "UTIL/trait.h"
 
 // ---------------- ast_expr_byte_t ----------------
@@ -71,13 +72,9 @@ typedef struct { DERIVE_AST_EXPR; adept_double value; } ast_expr_double_t;
 // Expression for a literal boolean value
 typedef struct { DERIVE_AST_EXPR; adept_bool value; } ast_expr_boolean_t;
 
-// ---------------- ast_expr_str_t ----------------
-// Expression for a literal length-string value
-typedef struct { DERIVE_AST_EXPR; weak_cstr_t array; length_t length; } ast_expr_str_t;
-
-// ---------------- ast_expr_cstr_t ----------------
-// Expression for a literal null-terminated string value
-typedef struct { DERIVE_AST_EXPR; weak_cstr_t value; } ast_expr_cstr_t;
+// ---------------- ast_expr_str_t, ast_expr_cstr_t ----------------
+// Expression for a literal string value
+typedef struct { DERIVE_AST_EXPR; weak_cstr_t array; length_t length; } ast_expr_str_t, ast_expr_cstr_t;
 
 // ---------------- ast_expr_null_t ----------------
 // Expression for 'null' value
@@ -125,7 +122,7 @@ typedef struct {
 
 // ---------------- ast_expr_new_cstring_t ----------------
 // Dynamically allocates a null-terminated string on the heap
-typedef struct { DERIVE_AST_EXPR; weak_cstr_t value; } ast_expr_new_cstring_t;
+typedef struct { DERIVE_AST_EXPR; weak_cstr_t array; length_t length; } ast_expr_new_cstring_t;
 
 // ---------------- ast_expr_enum_value_t ----------------
 // Gets the constant value of an enum kind
@@ -133,7 +130,17 @@ typedef struct { DERIVE_AST_EXPR; weak_cstr_t enum_name; weak_cstr_t kind_name; 
 
 // ---------------- ast_expr_generic_enum_value_t ----------------
 // Gets the constant value of a generic enum kind
+// Used for [enum with APPLE] for example
 typedef struct { DERIVE_AST_EXPR; weak_cstr_t kind_name; } ast_expr_generic_enum_value_t;
+
+// ---------------- ast_expr_generic_plural_enum_value_t ----------------
+// A value that represents one out of a number of possible generic enum kind states
+// Used for [enum with APPLE, ORANGE] for example
+typedef struct {
+    DERIVE_AST_EXPR;
+    strong_cstr_list_t kinds;
+    length_t member_index;
+} ast_expr_generic_plural_enum_value_t;
 
 // ---------------- ast_expr_static_data_t ----------------
 // Represents a static array value
@@ -184,6 +191,17 @@ typedef struct {
     // Throw an error when trying to use functions marked as "no discard"
     bool no_discard : 1;
 } ast_expr_call_t;
+
+// ---------------- ast_expr_super_t ----------------
+// Expression for `super()` invocations
+typedef struct {
+    DERIVE_AST_EXPR;
+    ast_expr_t **args;
+    length_t arity;
+
+    // Ignore this call if it can't be compiled
+    bool is_tentative : 1;
+} ast_expr_super_t;
 
 // ---------------- ast_expr_variable_t ----------------
 // Expression for accessing a variable
@@ -510,6 +528,18 @@ ast_expr_t *ast_expr_clone(ast_expr_t* expr);
 // If `expr` is NULL, then NULL otherwise clones an expression, producing a duplicate
 ast_expr_t *ast_expr_clone_if_not_null(ast_expr_t *expr);
 
+// ---------------- ast_exprs_clone ----------------
+// Clones an array of expressions
+inline ast_expr_t **ast_exprs_clone(ast_expr_t **exprs, length_t arity){
+    ast_expr_t **array = malloc(sizeof *array * arity);
+
+    for(length_t i = 0; i < arity; i++){
+        array[i] = ast_expr_clone(exprs[i]);
+    }
+
+    return array;
+}
+
 // ---------------- ast_expr_create_bool ----------------
 // Creates a boolean expression
 ast_expr_t *ast_expr_create_bool(adept_bool value, source_t source);
@@ -528,7 +558,8 @@ ast_expr_t *ast_expr_create_string(char *array, length_t length, source_t source
 
 // ---------------- ast_expr_create_cstring ----------------
 // Creates a cstring expression
-ast_expr_t *ast_expr_create_cstring(char *value, source_t source);
+ast_expr_t *ast_expr_create_cstring(char *array, source_t source);
+ast_expr_t *ast_expr_create_cstring_of_length(char *array, length_t length, source_t source);
 
 // ---------------- ast_expr_create_null ----------------
 // Creates a null expression
@@ -545,6 +576,10 @@ ast_expr_t *ast_expr_create_call(strong_cstr_t name, length_t arity, ast_expr_t 
 // NOTE: 'gives' may be NULL or 'gives.elements_length' be zero
 //       to indicate no return matching
 void ast_expr_create_call_in_place(ast_expr_call_t *out_expr, strong_cstr_t name, length_t arity, ast_expr_t **args, bool is_tentative, ast_type_t *gives, source_t source);
+
+// ---------------- ast_expr_create_super ----------------
+// Creates a `super()` call expression
+ast_expr_t *ast_expr_create_super(ast_expr_t **args, length_t arity, bool is_tentative, source_t source);
 
 // ---------------- ast_expr_create_method_call ----------------
 // Creates a call method expression
@@ -672,10 +707,9 @@ ast_expr_t *ast_expr_create_switch(source_t source, ast_expr_t *value, ast_case_
 // Creates a declare-named-expression statement
 ast_expr_t *ast_expr_create_declare_named_expression(source_t source, ast_named_expression_t named_expression);
 
-// ---------------- ast_expr_create_declare_named_expression ----------------
-// Creates a declare-named-expression statement
+// ---------------- ast_expr_create_assert ----------------
+// Creates an assert statement
 ast_expr_t *ast_expr_create_assert(source_t source, ast_expr_t *assertion);
-
 
 // ---------------- ast_expr_list_create ----------------
 // Creates an ast_expr_list_t with a given capacity

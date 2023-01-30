@@ -91,9 +91,11 @@ errorcode_t parse_primary_expr(parse_ctx_t *ctx, ast_expr_t **out_expr){
     case TOKEN_FALSE:
         *out_expr = ast_expr_create_bool(false, sources[(*i)++]);
         break;
-    case TOKEN_CSTRING:
-        *out_expr = ast_expr_create_cstring((char*) tokens[*i].data, sources[*i]);
-        *i += 1;
+    case TOKEN_CSTRING: {
+            token_string_data_t *string_data = (token_string_data_t*) tokens[*i].data;
+            *out_expr = ast_expr_create_cstring_of_length(string_data->array, string_data->length, sources[*i]);
+            *i += 1;
+        }
         break;
     case TOKEN_STRING: {
             token_string_data_t *string_data = (token_string_data_t*) tokens[*i].data;
@@ -759,7 +761,23 @@ errorcode_t parse_expr_call(parse_ctx_t *ctx, ast_expr_t **out_expr, bool allow_
         memset(&gives, 0, sizeof(ast_type_t));
     }
 
-    *out_expr = ast_expr_create_call(name, arity, args, is_tentative, &gives, source);
+    if(ctx->func && ctx->func->traits & AST_FUNC_CLASS_CONSTRUCTOR && streq("super", name)){
+        ast_poly_composite_t *composite = ctx->composite_association;
+        assert(composite->is_class);
+
+        if(AST_TYPE_IS_NONE(composite->parent)){
+            compiler_panicf(ctx->compiler, source, "Cannot call constructor for parent when class has no parent class");
+            ast_type_free(&gives);
+            ast_exprs_free_fully(args, arity);
+            free(name);
+            return FAILURE;
+        }
+
+        *out_expr = ast_expr_create_super(args, arity, is_tentative, source);
+    } else {
+        *out_expr = ast_expr_create_call(name, arity, args, is_tentative, &gives, source);
+    }
+
     return SUCCESS;
 }
 
@@ -1090,16 +1108,16 @@ errorcode_t parse_expr_new(parse_ctx_t *ctx, ast_expr_t **out_expr){
         // This is actually an 'ast_expr_new_cstring_t' expression,
         // instead of a 'ast_expr_new_t' expression
 
-        ast_expr_new_cstring_t *new_cstring_expr = malloc(sizeof(ast_expr_new_cstring_t));
+        token_string_data_t *string_data = (token_string_data_t*) parse_ctx_peek_data(ctx);
 
-        *new_cstring_expr = (ast_expr_new_cstring_t){
+        *out_expr = (ast_expr_t*) malloc_init(ast_expr_new_cstring_t, {
             .id = EXPR_NEW_CSTRING,
             .source = source,
-            .value = (char*) parse_ctx_peek_data(ctx),
-        };
+            .array = string_data->array,
+            .length = string_data->length,
+        });
 
         *i += 1;
-        *out_expr = (ast_expr_t*) new_cstring_expr;
         return SUCCESS;
     }
 

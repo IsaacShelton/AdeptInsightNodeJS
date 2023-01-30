@@ -20,7 +20,6 @@ extern "C" {
 #include "AST/ast_named_expression.h"
 #include "AST/ast_type.h"
 #include "AST/meta_directives.h"
-#include "BRIDGE/type_table.h"
 #include "UTIL/color.h"
 #include "UTIL/ground.h"
 #include "UTIL/index_id_list.h"
@@ -46,6 +45,7 @@ typedef struct {
     ast_expr_list_t statements;
     source_t source;
     maybe_null_strong_cstr_t export_as;
+    length_t instantiation_depth;
     
     union {
         func_id_t virtual_origin; // can be INVALID_FUNC_ID
@@ -118,6 +118,7 @@ typedef struct {
 
 // ---------------- DERIVE_AST_COMPOSITE ----------------
 // Common fields for all ast_composite_*_t derivatives
+// NOTE: `parent` may be AST_TYPE_NONE
 #define DERIVE_AST_COMPOSITE struct { \
     strong_cstr_t name; \
     ast_layout_t layout; \
@@ -225,9 +226,6 @@ typedef struct {
     length_t libraries_length;
     length_t libraries_capacity;
     ast_shared_common_t common;
-
-    // Data members for bridging
-    type_table_t *type_table;
 
     // Data members for meta definitions
     meta_definition_t *meta_definitions;

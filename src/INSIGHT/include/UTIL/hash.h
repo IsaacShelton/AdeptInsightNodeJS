@@ -18,7 +18,15 @@ typedef length_t hash_t;
 
 // ---------------- hash_data ----------------
 // Hashes a generic block of memory
-hash_t hash_data(void *data, length_t size);
+hash_t hash_data(const void *data, length_t size);
+
+// ---------------- hash_string ----------------
+// Hashes a C string
+hash_t hash_string(const char *s);
+
+// ---------------- hash_strings ----------------
+// Hashes an array of C strings
+hash_t hash_strings(char *strings[], length_t num_strings);
 
 // ---------------- hash_combine ----------------
 // Combines two hashes into one

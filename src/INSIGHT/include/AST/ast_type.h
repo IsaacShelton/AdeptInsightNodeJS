@@ -17,12 +17,13 @@ extern "C" {
     ---------------------------------------------------------------------------
 */
 
-#include "UTIL/hash.h"
-#include "UTIL/trait.h"
-#include "UTIL/ground.h"
 #include "AST/ast_expr.h"
 #include "AST/ast_layout.h"
 #include "AST/ast_type_lean.h" // IWYU pragma: export
+#include "UTIL/hash.h"
+#include "UTIL/string_list.h"
+#include "UTIL/trait.h"
+#include "UTIL/ground.h"
 
 // Possible AST type elements
 enum {
@@ -41,6 +42,8 @@ enum {
     AST_ELEM_GENERIC_BASE,
     AST_ELEM_LAYOUT,
     AST_ELEM_UNKNOWN_ENUM,
+    AST_ELEM_UNKNOWN_PLURAL_ENUM,
+    AST_ELEM_ANONYMOUS_ENUM,
 };
 
 // Possible data flow patterns
@@ -167,6 +170,37 @@ typedef struct {
     weak_cstr_t kind_name;
 } ast_elem_unknown_enum_t;
 
+// ---------------- ast_elem_unknown_plural_enum_t ----------------
+// Type element for an unknown enum value that could be multiple different kinds
+/*
+    Creation cases
+
+    ? ENUM : [MEMBER] = ENUM
+    ? [MEMBER] : [MEMBER] = [MEMBERS...]
+    ? [MEMBER] : [MEMBERS...] = [MEMBERS...]
+    ? [MEMBERS...] : [MEMBER] = [MEMBERS...]
+    ? [MEMBERS...] : [MEMBERS...] = [MEMBERS...]
+
+    Specialization cases
+
+    [MEMBERS...] => [MEMBERS...] reorder
+    [MEMBERS...] => ENUM reorder
+*/
+typedef struct {
+    unsigned int id;
+    source_t source;
+    strong_cstr_list_t kinds;
+} ast_elem_unknown_plural_enum_t;
+
+// ---------------- ast_elem_anonymous_enum_t ----------------
+// Type element for an anonymous enum
+// NOTE: `kinds` must be a sorted and contain distinct members
+typedef struct {
+    unsigned int id;
+    source_t source;
+    strong_cstr_list_t kinds;
+} ast_elem_anonymous_enum_t;
+
 // ---------------- ast_type_clone ----------------
 // Clones an AST type, producing a duplicate
 ast_type_t ast_type_clone(const ast_type_t *type);
@@ -287,6 +321,14 @@ bool ast_type_is_func(const ast_type_t *type);
 // Returns whether an AST type is an unknown type of an enum value
 bool ast_type_is_unknown_enum(const ast_type_t *type);
 
+// ---------------- ast_type_is_unknown_plural_enum ----------------
+// Returns whether an AST type is an unknown plural enum type
+bool ast_type_is_unknown_plural_enum(const ast_type_t *type);
+
+// ---------------- ast_type_is_anonymous_enum ----------------
+// Returns whether an AST type is an anonymous enum type
+bool ast_type_is_anonymous_enum(const ast_type_t *type);
+
 // ---------------- ast_type_has_polymorph ----------------
 // Returns whether an AST type contains a polymorphic type
 bool ast_type_has_polymorph(const ast_type_t *type);
@@ -318,9 +360,18 @@ ast_type_t ast_type_unwrapped_view(ast_type_t *type);
 // NOTE: Frees memory allocated for the fixed-array element
 void ast_type_unwrap_fixed_array(ast_type_t *inout_type);
 
-// ---------------- ast_type_struct_name ----------------
+// ---------------- ast_type_base_name ----------------
 // Returns the struct name for a type (or NULL if not applicable)
-maybe_null_weak_cstr_t ast_type_struct_name(const ast_type_t *type);
+maybe_null_weak_cstr_t ast_type_base_name(const ast_type_t *type);
+
+// ---------------- ast_type_unknown_enum_like_extract_kinds ----------------
+// Extracts the different kinds of an unknown enum like type
+successful_t ast_type_unknown_enum_like_extract_kinds(const ast_type_t *ast_type, strong_cstr_list_t *out_into_list);
+
+// ---------------- ast_elem_anonymous_enum_get_member_index ----------------
+// Returns the index of a member of an anonymous enum
+// Returns -1 if no member with the given name exists
+maybe_index_t ast_elem_anonymous_enum_get_member_index(ast_elem_anonymous_enum_t *anonymous_enum, const char *member_name);
 
 // ---------------- ast_elem_clone ----------------
 // Clones an AST type element, producing a duplicate

@@ -39,8 +39,9 @@ enum {
     ANY_TYPE_KIND_UNION,
     ANY_TYPE_KIND_FUNC_PTR,
     ANY_TYPE_KIND_FIXED_ARRAY,
+    ANY_TYPE_KIND_ENUM,
 };
-#define MAX_ANY_TYPE_KIND ANY_TYPE_KIND_FIXED_ARRAY
+#define MAX_ANY_TYPE_KIND ANY_TYPE_KIND_ENUM
 
 // ---------------- any_type_kind_names ----------------
 // Names for each ANY_TYPE_KIND_* id
@@ -92,6 +93,10 @@ void any_inject_ast_AnyFuncPtrType(ast_t *ast);
 // ---------------- any_inject_ast_AnyFixedArrayType ----------------
 // Injects AST struct 'AnyFixedArrayType'
 void any_inject_ast_AnyFixedArrayType(ast_t *ast);
+
+// ---------------- any_inject_ast_AnyEnumType ----------------
+// Injects AST struct 'AnyEnumType'
+void any_inject_ast_AnyEnumType(ast_t *ast);
 
 // ---------------- any_inject_ast___types__ ----------------
 // Injects AST global variable '__types__'

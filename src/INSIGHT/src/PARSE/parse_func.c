@@ -217,7 +217,7 @@ void parse_func_solidify_constructor(ast_t *ast, ast_func_t *constructor, source
     // for  `struct Person (...) { constructor(name String, age int){ ... } }`
 
     const ast_type_t this_pointee_type_view = ast_type_unwrapped_view(&constructor->arg_types[0]);
-    weak_cstr_t struct_name = ast_type_struct_name(&this_pointee_type_view);
+    weak_cstr_t struct_name = ast_type_base_name(&this_pointee_type_view);
 
     ast_func_head_t func_head = (ast_func_head_t){
         .name = strclone(struct_name),
@@ -860,14 +860,16 @@ errorcode_t parse_func_alias(parse_ctx_t *ctx){
 
     expand((void**) &ast->func_aliases, sizeof(ast_func_alias_t), ast->func_aliases_length, &ast->func_aliases_capacity, 1, 8);
 
-    ast_func_alias_t *falias = &ast->func_aliases[ast->func_aliases_length++];
-    falias->from = from;
-    falias->to = to;
-    falias->arg_types = arg_types;
-    falias->arity = arity;
-    falias->required_traits = required_traits;
-    falias->source = source;
-    falias->match_first_of_name = match_first_of_name;
+    ast->func_aliases[ast->func_aliases_length++] = (ast_func_alias_t){
+        .from = from,
+        .to = to,
+        .arg_types = arg_types,
+        .arity = arity,
+        .required_traits = required_traits,
+        .source = source,
+        .match_first_of_name = match_first_of_name,
+    };
+
     return SUCCESS;
 }
 

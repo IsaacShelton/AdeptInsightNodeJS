@@ -62,7 +62,7 @@ errorcode_t parse_meta(parse_ctx_t *ctx){
     #define META_DIRECTIVE_UNLESS            21
     #define META_DIRECTIVE_WARNING           22
 
-    maybe_index_t standard = binary_string_search(standard_directives, sizeof(standard_directives) / sizeof(char*), directive_name);
+    maybe_index_t standard = binary_string_search_const(standard_directives, sizeof(standard_directives) / sizeof(char*), directive_name);
 
     if(standard == -1){
         compiler_panicf(ctx->compiler, source, "Unrecognized meta directive #%s", directive_name);
@@ -113,7 +113,7 @@ errorcode_t parse_meta(parse_ctx_t *ctx){
                 if(tokenlist->tokens[*i].id != TOKEN_META) continue;
 
                 char *pass_over_directive_name = (char*) tokenlist->tokens[*i].data;
-                maybe_index_t pass_id = binary_string_search(standard_directives, sizeof(standard_directives) / sizeof(char*), pass_over_directive_name);
+                maybe_index_t pass_id = binary_string_search_const(standard_directives, sizeof(standard_directives) / sizeof(char*), pass_over_directive_name);
 
                 switch(pass_id){
                 case META_DIRECTIVE_IF: case META_DIRECTIVE_UNLESS:
@@ -150,7 +150,7 @@ errorcode_t parse_meta(parse_ctx_t *ctx){
                 if(tokenlist->tokens[*i].id != TOKEN_META) continue;
 
                 char *pass_over_directive_name = (char*) tokenlist->tokens[*i].data;
-                maybe_index_t pass_id = binary_string_search(standard_directives, sizeof(standard_directives) / sizeof(char*), pass_over_directive_name);
+                maybe_index_t pass_id = binary_string_search_const(standard_directives, sizeof(standard_directives) / sizeof(char*), pass_over_directive_name);
 
                 switch(pass_id){
                 case META_DIRECTIVE_IF: case META_DIRECTIVE_UNLESS:
@@ -237,7 +237,7 @@ errorcode_t parse_meta(parse_ctx_t *ctx){
                 if(tokenlist->tokens[*i].id != TOKEN_META) continue;
 
                 char *pass_over_directive_name = (char*) tokenlist->tokens[*i].data;
-                maybe_index_t pass_id = binary_string_search(standard_directives, sizeof(standard_directives) / sizeof(char*), pass_over_directive_name);
+                maybe_index_t pass_id = binary_string_search_const(standard_directives, sizeof(standard_directives) / sizeof(char*), pass_over_directive_name);
 
                 if(pass_id == META_DIRECTIVE_IF || pass_id == META_DIRECTIVE_UNLESS){
                     ends_needed++;
@@ -608,13 +608,7 @@ errorcode_t parse_meta_primary_expr(parse_ctx_t *ctx, meta_expr_t **out_expr){
         (*out_expr)->id = META_EXPR_NULL;
         (*i)++;
         break;
-    case TOKEN_CSTRING:
-        *out_expr = malloc(sizeof(meta_expr_str_t));
-        (*out_expr)->id = META_EXPR_STR;
-        ((meta_expr_str_t*) *out_expr)->value = strclone(tokens[*i].data);
-        (*i)++;
-        break;
-    case TOKEN_STRING: {
+    case TOKEN_CSTRING: case TOKEN_STRING: {
             token_string_data_t *token_data = tokens[*i].data;
             meta_expr_str_t *str_expr = malloc(sizeof(meta_expr_str_t));
             str_expr->id = META_EXPR_STR;

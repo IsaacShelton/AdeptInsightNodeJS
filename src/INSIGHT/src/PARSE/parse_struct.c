@@ -51,7 +51,7 @@ errorcode_t parse_composite(parse_ctx_t *ctx, bool is_union){
     };
     length_t invalid_names_length = sizeof(invalid_names) / sizeof(const char*);
 
-    if(binary_string_search(invalid_names, invalid_names_length, name) != -1){
+    if(binary_string_search_const(invalid_names, invalid_names_length, name) != -1){
         compiler_panicf(ctx->compiler, source, "Reserved type name '%s' can't be used to create a %s", name, is_union ? "union" : "struct");
         goto body_failure;
     }
@@ -403,7 +403,7 @@ static errorcode_t resolve_polymorphs_in_integration_for_bone(parse_ctx_t *ctx, 
 
     switch(bone->kind){
     case AST_LAYOUT_BONE_KIND_TYPE:
-        if(ast_resolve_type_polymorphs(ctx->compiler, ctx->ast->type_table, catalog, &bone->type, NULL)){
+        if(ast_resolve_type_polymorphs(ctx->compiler, NULL, catalog, &bone->type, NULL)){
             return FAILURE;
         }
         break;
