@@ -13,6 +13,7 @@ void query_init(query_t *query){
     query->filename = NULL;
     query->code = NULL;
     query->warnings = true;
+    query->features = QUERY_FEATURE_NONE;
 }
 
 void query_free(query_t *query){
@@ -83,6 +84,41 @@ successful_t query_parse(weak_cstr_t json, query_t *out_query, strong_cstr_t *ou
                 *out_error = mallocandsprintf("Expected boolean value for '%s'", ctx.value.content);
                 goto failure;
             }
+        } else if(jsmnh_obj_ctx_eq(&ctx, "features")){
+            // "features" : ...
+
+            query_features_t features = {0};
+
+            if(!jsmnh_obj_ctx_get_array(&ctx)){
+                *out_error = mallocandsprintf("Expected array value for '%s'", ctx.value.content);
+                goto failure;
+            }
+
+            length_t count = ctx.tokens.tokens[ctx.token_index++].size;
+
+            for(length_t i = 0; i < count; i++){
+                strong_cstr_t content;
+                if(!jsmnh_obj_ctx_get_variable_string(&ctx, &content)){
+                    *out_error = mallocandsprintf("Expected a feature string in features array");
+                    goto failure;
+                }
+
+                ctx.token_index++;
+
+                if(streq(content, "include-arg-info")){
+                    features |= QUERY_FEATURE_INCLUDE_ARG_INFO;
+                } else if(streq(content, "include-calls")){
+                    features |= QUERY_FEATURE_INCLUDE_CALLS;
+                } else {
+                    *out_error = mallocandsprintf("Unsupported feature '%s'", content);
+                    free(content);
+                    goto failure;
+                }
+
+                free(content);
+            }
+
+            out_query->features = features;
         } else {
             // "???" : "???"
             if(out_error) *out_error = mallocandsprintf("Unrecognized key '%s'", ctx.value.content);

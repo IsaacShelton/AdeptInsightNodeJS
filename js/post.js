@@ -19,22 +19,31 @@ function invokeInsight(query_json_string){
     _free(result_json_cstring);
 
     checkUnflushedContent();
-    
+
     return JSON.parse(result_json);
 }
 
 setTimeout(() => {
-    var filename = "/Users/isaac/Projects/Adept/build/macOS-Debug/import/2.7/basics.adept";
+    var filename = "/Users/isaac/Projects/Adept/build/macOS-Debug/import/2.8/basics.adept";
 
     var query = JSON.stringify(
         {
             "query": "ast",
             "infrastructure": "/Users/isaac/Projects/Adept/build/macOS-Debug/",
             "filename": filename,
-            "code": require('fs').readFileSync(filename, "utf8")
+            "code": require('fs').readFileSync(filename, "utf8"),
+            "features": ['include-arg-info', 'include-calls']
         }
     );
 
     var result = invokeInsight(query);
     console.log(result);
+
+    /*
+        // More detailed info
+        // console.log(result?.ast?.functions[390] ?? result);
+        // console.log(Array.from(result?.calls.entries()).filter(a => a[1].length > 10).map(a => [result.ast.functions[a[0]].name, a[1], result.ast.functions[a[0]].source]) ?? result);
+        // console.log(Array.from(result?.calls.entries()).filter(a => a[1].length > 10).map(a => a[1]) ?? result);
+        // console.log(result?.calls ?? result);
+    */
 }, 100);

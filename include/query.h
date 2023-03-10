@@ -4,6 +4,7 @@
 #define _ISAAC_QUERY_H
 
 #include "UTIL/ground.h"
+#include "UTIL/trait.h"
 #include "json_builder.h"
 
 // ---------------- query_kind_t ----------------
@@ -14,6 +15,13 @@ typedef enum {
     QUERY_KIND_AST
 } query_kind_t;
 
+
+// ---------------- query_features_t ----------------
+typedef trait_t query_features_t;
+#define QUERY_FEATURE_NONE TRAIT_NONE
+#define QUERY_FEATURE_INCLUDE_ARG_INFO TRAIT_1
+#define QUERY_FEATURE_INCLUDE_CALLS TRAIT_2
+
 // ---------------- query_t ----------------
 // A Query
 typedef struct {
@@ -22,6 +30,7 @@ typedef struct {
     maybe_null_strong_cstr_t filename;
     maybe_null_strong_cstr_t code;
     bool warnings;
+    query_features_t features;
 } query_t;
 
 // ---------------- query_t ----------------
