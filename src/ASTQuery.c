@@ -89,19 +89,22 @@ static void add_function_alias_definition(json_builder_t *builder, compiler_t *c
     json_build_object_next(builder);
 }
 
-static void add_composite_definition(json_builder_t *builder, ast_composite_t *composite){
+static void add_composite_definition(json_builder_t *builder, compiler_t *compiler, ast_composite_t *composite){
     json_build_object_start(builder);
     json_build_object_key(builder, "name");
     json_build_string(builder, composite->name);
     json_build_object_next(builder);
     json_build_object_key(builder, "definition");
     json_build_composite_definition(builder, composite);
+    json_build_object_next(builder);
+    json_build_object_key(builder, "source");
+    json_build_source(builder, compiler, composite->source);
     json_build_object_end(builder);
 
     json_build_object_next(builder);
 }
 
-static void add_enum_definition(json_builder_t *builder, ast_enum_t *enum_value){
+static void add_enum_definition(json_builder_t *builder, compiler_t *compiler, ast_enum_t *enum_value){
     json_build_object_start(builder);
     json_build_object_key(builder, "name");
     json_build_string(builder, enum_value->name);
@@ -116,6 +119,9 @@ static void add_enum_definition(json_builder_t *builder, ast_enum_t *enum_value)
     }
     if(enum_value->length != 0) json_builder_remove(builder, 2); // Remove trailing ', '
     json_builder_append(builder, ")\"");
+    json_build_object_next(builder);
+    json_build_object_key(builder, "source");
+    json_build_source(builder, compiler, enum_value->source);
     json_build_object_end(builder);
 
     json_build_object_next(builder);
@@ -187,10 +193,10 @@ void build_ast(json_builder_t *builder, compiler_t *compiler, object_t *object, 
         json_build_object_key(builder, "composites");
         json_build_array_start(builder);
         for(length_t i = 0; i < ast->composites_length; i++){
-            add_composite_definition(builder, &ast->composites[i]);
+            add_composite_definition(builder, compiler, &ast->composites[i]);
         }
         for(length_t i = 0; i < ast->poly_composites_length; i++){
-            add_composite_definition(builder, (ast_composite_t*) &ast->poly_composites[i]);
+            add_composite_definition(builder, compiler, (ast_composite_t*) &ast->poly_composites[i]);
         }
         if(ast->composites_length || ast->poly_composites_length) json_builder_remove(builder, 1); // Remove trailing ','
         json_build_array_end(builder);
@@ -199,7 +205,7 @@ void build_ast(json_builder_t *builder, compiler_t *compiler, object_t *object, 
         json_build_object_key(builder, "enums");
         json_build_array_start(builder);
         for(length_t i = 0; i < ast->enums_length; i++){
-            add_enum_definition(builder, &ast->enums[i]);
+            add_enum_definition(builder, compiler, &ast->enums[i]);
         }
         if(ast->enums_length) json_builder_remove(builder, 1); // Remove trailing ','
         json_build_array_end(builder);

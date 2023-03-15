@@ -1,7 +1,10 @@
 
+var is_wasm_initialized = false;
+
 Module['onRuntimeInitialized'] = function() {
     if (!Module["noFSInit"] && !FS.init.initialized) FS.init();
     TTY.init();
+    is_wasm_initialized = true;
 
     var filename = "/Users/isaac/Projects/Adept/build/macOS-Debug/import/2.8/basics.adept";
 
